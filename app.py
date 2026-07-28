@@ -39,7 +39,19 @@ state: dict[str, Any] = {
 
 
 def db() -> sqlite3.Connection:
-    con = sqlite3.connect(DB_PATH, timeout=15)
+    global DB_PATH
+    requested = Path(DB_PATH)
+    try:
+        requested.parent.mkdir(parents=True, exist_ok=True)
+        con = sqlite3.connect(requested, timeout=15)
+    except (OSError, sqlite3.OperationalError) as exc:
+        fallback = Path("/tmp/eth_scanner.db")
+        if requested == fallback:
+            raise
+        LOG.warning("資料庫路徑 %s 無法寫入（%s），暫時改用 %s；重啟後歷史可能遺失",
+                    requested, exc, fallback)
+        DB_PATH = str(fallback)
+        con = sqlite3.connect(fallback, timeout=15)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("""CREATE TABLE IF NOT EXISTS snapshots(
