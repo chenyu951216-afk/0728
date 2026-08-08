@@ -5,16 +5,15 @@ from fastapi.responses import HTMLResponse
 
 import app as core
 from v5_async_runtime import install_async
-from v5_runtime import install
+from v5_runtime import install as install_v5
+from v6_runtime import install as install_v6
 
-install(core)
+install_v5(core)
 install_async(core)
 
-# v5 changes the learning target itself: strategies are trained separately by
-# LONG/SHORT and use strategy-specific passive-fill outcomes. Reusing v4 rows via
-# INSERT OR IGNORE would silently contaminate v5 with old mixed/generic labels.
-# Preserve the old samples for audit, but rebuild the active learning set from the
-# already-cached 2020->present market data exactly once.
+# v5 changed the signal-learning target: strategies are trained separately by
+# LONG/SHORT and use strategy-specific passive-fill outcomes. Preserve old samples
+# for audit, but rebuild the active signal-model training set once.
 if core.get_state('v5_sample_schema') != 2:
     con = core.db()
     con.execute('DROP TABLE IF EXISTS learning_samples_v4_archive')
@@ -28,12 +27,15 @@ if core.get_state('v5_sample_schema') != 2:
     core.set_state('last_train_ts_v5', 0)
     core.set_state('v5_sample_schema', 2)
 
-# Any legacy v4 Champion that survived a pre-migration database must never be
-# selected/displayed by the v5 runtime. The record is retained for audit only.
+# Legacy non-directional Champions remain available for audit only.
 con = core.db()
 con.execute("UPDATE model_registry SET status='ARCHIVED' WHERE status='CHAMPION' AND direction NOT IN ('LONG','SHORT')")
 con.commit()
 con.close()
+
+# v6 adds a second independent certification layer for the exact execution plan.
+# New signals require BOTH the signal Champion and its matching execution Champion.
+install_v6(core)
 
 app = core.app
 PORT = core.PORT
