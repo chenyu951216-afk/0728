@@ -21,16 +21,13 @@ from v7_monitor_gate import install as install_monitor_gate
 install_v5(core)
 install_async(core)
 
-# v5 changed the signal-learning target: strategies are trained separately by
-# LONG/SHORT. Preserve the old v4 set for audit once.
 if core.get_state('v5_sample_schema') != 2:
     con = core.db()
     con.execute('DROP TABLE IF EXISTS learning_samples_v4_archive')
     con.execute('CREATE TABLE learning_samples_v4_archive AS SELECT * FROM learning_samples')
     con.execute('DELETE FROM learning_samples')
     con.execute("UPDATE model_registry SET status='ARCHIVED' WHERE status='CHAMPION'")
-    con.commit()
-    con.close()
+    con.commit(); con.close()
     core.set_state('last_learning_sample_ts_v2', core.START_TS)
     core.set_state('v5_last_train_sample_total', 0)
     core.set_state('last_train_ts_v5', 0)
@@ -38,39 +35,28 @@ if core.get_state('v5_sample_schema') != 2:
 
 con = core.db()
 con.execute("UPDATE model_registry SET status='ARCHIVED' WHERE status='CHAMPION' AND direction NOT IN ('LONG','SHORT')")
-con.commit()
-con.close()
+con.commit(); con.close()
 
-# Critical point-in-time correction: exchange timestamps are candle OPEN times.
-# Historical HTF features now include a 1H/4H/1D bar only after its close was
-# actually knowable. Existing contaminated samples/Champions are archived.
+# Historical features are close-time safe; old contaminated samples/Champions are archived.
 install_timesafe_learning(core)
-# Champion replacement compares stored clean OOS metrics rather than letting an
-# old final model score historical rows it may already have seen.
+# Champion evolution compares only stored clean OOS metrics and a fresh recent fold.
 install_signal_learner(core)
-# The execution simulator uses the same close-time eligibility for 30m/1h
-# structural invalidation levels.
+# Execution 30m/1h structures obey the same historical close-time eligibility.
 install_execution_alignment()
-
-# v7 retires v6 execution metrics, uses point-in-time historical validation,
-# and separates live execution outcomes from signal-model labels.
+# Point-in-time Signal OOF + independent validation + untouched execution audit.
 install_v7(core)
-# Stop-loss re-entry requires both elapsed cooldown and a genuinely new market
-# structure; repeated directional whipsaws trigger a longer quarantine.
+# Losing-stop cooldown and structural reset / whipsaw quarantine.
 install_reentry_guard()
-# Every Discord alert reports the active runtime instead of a stale v5 footer.
+# Dynamic runtime-labelled Discord delivery, no stale v5 footer.
 install_discord_runtime(core)
-# Clean historical validation is necessary but not sufficient: if a deployed
-# version materially degrades in paper/live outcomes it is temporarily quarantined.
+# Deployment drift circuit breaker from separate live execution outcomes.
 install_live_health(core)
-# Avoid repeating identical CPU-heavy execution searches when no model/data changed,
-# while still doing a forced fresh-data execution re-audit once per day.
+# Throttled signal learning plus daily fresh-data execution re-audit.
 install_learning_guard(core)
-# Live Entry/TP/SL lifecycle is driven by ordered Gate public trades, not closed
-# 15m candles. The feed is paginated to prevent high-activity truncation.
+# Ordered public-trade lifecycle monitor, paginated for complete coverage.
 install_trade_monitor(core)
 install_trade_feed(core)
-# If the ordered feed cannot prove complete coverage, new positions are forbidden.
+# Fail closed: no new position unless the risk feed proves complete coverage.
 install_monitor_gate(core)
 
 app = core.app
@@ -81,7 +67,7 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 
 @app.get('/', response_class=HTMLResponse)
 def dashboard() -> str:
-    return Path('dashboard.html').read_text(encoding='utf-8')
+    return Path('dashboard_v7.html').read_text(encoding='utf-8')
 
 
 if __name__ == '__main__':
