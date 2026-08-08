@@ -60,8 +60,10 @@ class ExecutionV7Tests(unittest.TestCase):
         self.assertEqual(sum(x['allocation'] for x in plan['targets']),100)
 
     def test_bootstrap_interval_orders_bounds(self):
+        # A confidence interval is allowed to degenerate when every sampled block
+        # has exactly the same mean. The invariant is lower <= upper, not strict <.
         low,high=ex._block_bootstrap_ev([.2,-.1,.3,.1,-.05,.2,.15,.1]*10)
-        self.assertLess(low,high)
+        self.assertLessEqual(low,high)
 
 
 class RuntimeV7Tests(unittest.TestCase):
