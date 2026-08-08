@@ -19,7 +19,7 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
       - name: Compile
-        run: python -m py_compile app.py server.py adaptive_engine.py adaptive_v5.py execution_v6.py execution_v7.py market_data.py derivative_data.py v5_runtime.py v5_async_runtime.py v6_runtime.py v6_scan_runtime.py v7_runtime.py v7_timesafe_learning.py v7_signal_learner.py v7_execution_alignment.py v7_fine_execution.py v7_reentry_guard.py v7_discord_runtime.py v7_live_health.py v7_learning_guard.py v7_trade_monitor.py v7_timeout_guard.py v7_trade_feed.py v7_monitor_gate.py test_app.py test_execution_v6.py test_v7.py test_v7_timesafe.py test_v7_fine_execution.py test_v7_trade_monitor.py test_v7_timeout.py test_v7_safety.py
+        run: python -m py_compile app.py server.py adaptive_engine.py adaptive_v5.py execution_v6.py execution_v7.py market_data.py derivative_data.py v5_runtime.py v5_async_runtime.py v6_runtime.py v6_scan_runtime.py v7_runtime.py v7_timesafe_learning.py v7_signal_learner.py v7_execution_alignment.py v7_fine_execution.py v7_reentry_guard.py v7_discord_runtime.py v7_post_exit.py v7_live_health.py v7_learning_guard.py v7_trade_monitor.py v7_timeout_guard.py v7_trade_feed.py v7_monitor_gate.py test_app.py test_execution_v6.py test_v7.py test_v7_timesafe.py test_v7_fine_execution.py test_v7_trade_monitor.py test_v7_timeout.py test_v7_safety.py
       - name: Dashboard present
         run: test -s dashboard_v7.html && grep -q 'ETH Adaptive AI v7' dashboard_v7.html
       - name: Unit tests
@@ -27,4 +27,4 @@ jobs:
       - name: Runtime import smoke test
         env:
           DATABASE_PATH: /tmp/eth-v7-ci.db
-        run: python -c "import server; assert server.app.version == '7.0.0'; assert server.core.state.get('risk_monitor_mode') == 'GATE_PUBLIC_TRADES_ORDERED'; print(server.app.version, server.core.state.get('risk_monitor_mode'))"
+        run: python -c "import server; assert server.app.version == '7.0.0'; assert server.core.state.get('risk_monitor_mode') == 'GATE_PUBLIC_TRADES_ORDERED'; assert 'risk_feed_probe' in server.core.state; print(server.app.version, server.core.state.get('risk_monitor_mode'))"
