@@ -3,17 +3,20 @@ from pathlib import Path
 import uvicorn
 from fastapi.responses import HTMLResponse
 
-from app import PORT, app
+import app as core
+from v5_runtime import install
 
-# Replace the minimal diagnostic root page with the responsive dashboard while
-# leaving every learning/trading API and background worker in app.py untouched.
-app.router.routes = [route for route in app.router.routes if getattr(route, "path", None) != "/"]
+install(core)
+app = core.app
+PORT = core.PORT
+
+app.router.routes = [route for route in app.router.routes if getattr(route, 'path', None) != '/']
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get('/', response_class=HTMLResponse)
 def dashboard() -> str:
-    return Path("dashboard.html").read_text(encoding="utf-8")
+    return Path('dashboard.html').read_text(encoding='utf-8')
 
 
-if __name__ == "__main__":
-    uvicorn.run("server:app", host="0.0.0.0", port=PORT)
+if __name__ == '__main__':
+    uvicorn.run('server:app', host='0.0.0.0', port=PORT)
