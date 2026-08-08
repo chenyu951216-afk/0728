@@ -10,6 +10,8 @@ from v7_timesafe_learning import install as install_timesafe_learning
 from v7_signal_learner import install as install_signal_learner
 from v7_execution_alignment import install as install_execution_alignment
 from v7_runtime import install as install_v7
+from v7_discord_runtime import install as install_discord_runtime
+from v7_live_health import install as install_live_health
 from v7_learning_guard import install as install_learning_guard
 from v7_trade_monitor import install as install_trade_monitor
 
@@ -50,7 +52,13 @@ install_execution_alignment()
 # v7 retires v6 execution metrics, uses point-in-time historical validation,
 # and separates live execution outcomes from signal-model labels.
 install_v7(core)
-# Avoid repeating identical CPU-heavy execution searches when no model/data changed.
+# Every Discord alert reports the active runtime instead of a stale v5 footer.
+install_discord_runtime(core)
+# Clean historical validation is necessary but not sufficient: if a deployed
+# version materially degrades in paper/live outcomes it is temporarily quarantined.
+install_live_health(core)
+# Avoid repeating identical CPU-heavy execution searches when no model/data changed,
+# while still doing a forced fresh-data execution re-audit once per day.
 install_learning_guard(core)
 # Live Entry/TP/SL lifecycle is driven by ordered Gate public trades, not closed
 # 15m candles, so a stopped position is recognized within the monitor interval.
