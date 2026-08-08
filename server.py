@@ -13,6 +13,7 @@ from v7_fine_execution import install as install_fine_execution
 from v7_runtime import install as install_v7
 from v7_reentry_guard import install as install_reentry_guard
 from v7_discord_runtime import install as install_discord_runtime
+from v7_post_exit import install as install_post_exit
 from v7_live_health import install as install_live_health
 from v7_learning_guard import install as install_learning_guard
 from v7_trade_monitor import install as install_trade_monitor
@@ -39,31 +40,21 @@ con = core.db()
 con.execute("UPDATE model_registry SET status='ARCHIVED' WHERE status='CHAMPION' AND direction NOT IN ('LONG','SHORT')")
 con.commit(); con.close()
 
-# Historical features are close-time safe; old contaminated samples/Champions are archived.
 install_timesafe_learning(core)
-# Champion evolution compares only stored clean OOS metrics and a fresh recent fold.
 install_signal_learner(core)
-# Execution 30m/1h structures obey the same historical close-time eligibility.
 install_execution_alignment()
-# Entry/SL/TP lifecycle is replayed on 5m history instead of ambiguous 15m paths;
-# missing 5m paths are excluded from audit rather than mislabeled.
 install_fine_execution()
-# Point-in-time Signal OOF + independent validation + untouched execution audit.
 install_v7(core)
-# Losing-stop cooldown and structural reset / whipsaw quarantine.
 install_reentry_guard()
-# Dynamic runtime-labelled Discord delivery, no stale v5 footer.
 install_discord_runtime(core)
-# Deployment drift circuit breaker from separate live execution outcomes.
+# Restore the 24h post-exit review loop; reviewed outcomes stay in the separate
+# execution-health store and never overwrite standardized Signal Model labels.
+install_post_exit(core)
 install_live_health(core)
-# Throttled signal learning plus daily fresh-data execution re-audit.
 install_learning_guard(core)
-# Ordered public-trade lifecycle monitor, with the same max-hold timeout used in audit.
 install_trade_monitor(core)
 install_timeout_guard()
-# Paginated catch-up prevents deploy/restart gaps from silently missing a stop.
 install_trade_feed(core)
-# Fail closed: no new position unless the risk feed proves complete coverage.
 install_monitor_gate(core)
 
 app = core.app
