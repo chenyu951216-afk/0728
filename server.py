@@ -4,9 +4,11 @@ import uvicorn
 from fastapi.responses import HTMLResponse
 
 import app as core
+from v5_async_runtime import install_async
 from v5_runtime import install
 
 install(core)
+install_async(core)
 
 # v5 changes the learning target itself: strategies are trained separately by
 # LONG/SHORT and use strategy-specific passive-fill outcomes. Reusing v4 rows via
