@@ -6,6 +6,8 @@ from fastapi.responses import HTMLResponse
 import app as core
 from v5_async_runtime import install_async
 from v5_runtime import install as install_v5
+from v7_timesafe_learning import install as install_timesafe_learning
+from v7_execution_alignment import install as install_execution_alignment
 from v7_runtime import install as install_v7
 from v7_learning_guard import install as install_learning_guard
 from v7_trade_monitor import install as install_trade_monitor
@@ -14,8 +16,7 @@ install_v5(core)
 install_async(core)
 
 # v5 changed the signal-learning target: strategies are trained separately by
-# LONG/SHORT and use strategy-specific point-in-time features. Preserve old rows
-# for audit and rebuild the active signal-model set once.
+# LONG/SHORT. Preserve the old v4 set for audit once.
 if core.get_state('v5_sample_schema') != 2:
     con = core.db()
     con.execute('DROP TABLE IF EXISTS learning_samples_v4_archive')
@@ -33,6 +34,14 @@ con = core.db()
 con.execute("UPDATE model_registry SET status='ARCHIVED' WHERE status='CHAMPION' AND direction NOT IN ('LONG','SHORT')")
 con.commit()
 con.close()
+
+# Critical point-in-time correction: exchange timestamps are candle OPEN times.
+# Historical HTF features now include a 1H/4H/1D bar only after its close was
+# actually knowable. Existing contaminated samples/Champions are archived.
+install_timesafe_learning(core)
+# The execution simulator uses the same close-time eligibility for 30m/1h
+# structural invalidation levels.
+install_execution_alignment()
 
 # v7 retires v6 execution metrics, uses point-in-time historical validation,
 # and separates live execution outcomes from signal-model labels.
