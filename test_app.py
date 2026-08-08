@@ -47,6 +47,25 @@ class DerivativeAvailabilityTests(unittest.TestCase):
         with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
             extras=DerivativeHistory(tmp.name,coinglass_key="").extras_at(1_800_000_000); self.assertEqual(extras["derivative_coverage"],0.0); self.assertEqual(extras["oi_available"],0.0); self.assertEqual(extras["funding_available"],0.0); self.assertEqual(extras["liquidation_available"],0.0); self.assertEqual(extras["book_available"],0.0)
 
+class DerivativeCursorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_empty_coinglass_windows_advance_persistent_cursor(self):
+        class EmptyHub:
+            async def fetch_bybit_oi_history(self,*args,**kwargs): return []
+            async def fetch_funding_history(self,*args,**kwargs): return []
+        with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+            history=DerivativeHistory(tmp.name,coinglass_key="test")
+            async def empty(*args,**kwargs): return 0
+            history._backfill_coinglass_oi=empty
+            history._backfill_coinglass_liquidation=empty
+            history._backfill_coinglass_book=empty
+            start=1_577_836_800
+            await history.backfill_tick(EmptyHub(),start,pages=1)
+            first=int(history._get_state("cg_cursor:oi_usd",start))
+            await history.backfill_tick(EmptyHub(),start,pages=1)
+            second=int(history._get_state("cg_cursor:oi_usd",start))
+            self.assertGreater(first,start)
+            self.assertGreater(second,first)
+
 class FeatureTests(unittest.TestCase):
     def test_feature_builder_is_finite_with_missing_derivatives(self):
         m15=candles(220,2000,0.15,900); h1=candles(220,1900,0.35,3600); btc=candles(220,50000,2.0,3600); regime=detect_regime(candles(220,1000,1.0,86400),candles(220,1000,0.4,14400),h1); features=build_features(m15,h1,btc,regime,extras={}); self.assertTrue(features); self.assertTrue(all(isinstance(v,float) for v in features.values()))
