@@ -24,8 +24,20 @@ def _trade_time_seconds(row: dict[str, Any]) -> float:
     return x
 
 
+def _monitor_start(core: Any, now: int) -> int:
+    row = core.latest_signal()
+    if not row:
+        return now - max(15, TRADE_MONITOR_SECONDS * 3)
+    mg = (row.get('payload') or {}).get('management', {})
+    last = float(mg.get('monitor_last_trade_time') or 0)
+    if last > 0:
+        return max(int(last) - 1, now - 120)
+    eligible = int(row.get('filled_at') or row.get('created_at') or now)
+    return max(eligible, now - 120)
+
+
 async def fetch_trade_events(core: Any) -> list[dict[str, Any]]:
-    now = int(time.time()); start = now - max(15, TRADE_MONITOR_SECONDS * 3)
+    now = int(time.time()); start = _monitor_start(core, now)
     async with httpx.AsyncClient(timeout=12) as client:
         try:
             raw, ticker = await asyncio.gather(
@@ -104,21 +116,34 @@ def process_trade_event(core: Any, event: dict[str, Any]) -> dict[str, Any] | No
     _persist_payload(core, row, payload, new_stop); return core.latest_signal()
 
 
-async def monitor_trades(core: Any) -> None:
-    before = core.latest_signal()
-    if not before: core.state['risk_monitor'] = {'ok': True, 'active': False, 'updated_at': int(time.time()), 'interval_seconds': TRADE_MONITOR_SECONDS, 'source': 'gate-trades'}; return
-    before_copy = json.loads(json.dumps(before, ensure_ascii=False)); events = await fetch_trade_events(core)
-    for event in events:
-        if not core.latest_signal(): break
-        process_trade_event(core, event)
-    current = v7_runtime._signal_by_id(core, before_copy['signal_id']); core.state['risk_monitor'] = {'ok': bool(events), 'active': bool(current and current['status'] in ('PLANNED','OPEN')), 'signal_id': before_copy['signal_id'], 'updated_at': int(time.time()), 'interval_seconds': TRADE_MONITOR_SECONDS, 'source': events[-1].get('source') if events else None}
-    if not current: return
-    if before_copy['status'] == 'PLANNED' and current['status'] == 'OPEN': await v5_runtime.robust_send_discord(core, '📥 ETH v7 逐筆成交確認入場', v7_runtime._summary(core, current), 0x3498DB)
-    if current['status'] == 'CLOSED' and before_copy['status'] in ('PLANNED','OPEN'): await v5_runtime.robust_send_discord(core, f"🛑 ETH v7 逐筆監控出場｜{current.get('exit_reason')}", v7_runtime._summary(core, current) + f"\nNet `{float(current.get('realized_r') or 0):+.2f}R`｜出場 `{float(current.get('exit_price') or 0):,.2f}`\n同方向再入場進入 cooldown + 新結構 reset。", 0x2ECC71 if float(current.get('realized_r') or 0) >= 0 else 0xE74C3C)
+async def _notify_transition(core: Any, previous: dict[str, Any], current: dict[str, Any] | None) -> bool:
+    signal_id = previous['signal_id']; current = current or v7_runtime._signal_by_id(core, signal_id)
+    if not current: return False
+    if previous['status'] == 'PLANNED' and current['status'] == 'OPEN':
+        await v5_runtime.robust_send_discord(core, '📥 ETH v7 逐筆成交確認入場', v7_runtime._summary(core, current), 0x3498DB)
+    old_hits = set((previous.get('payload') or {}).get('management', {}).get('hit_targets', [])); new_hits = set((current.get('payload') or {}).get('management', {}).get('hit_targets', []))
     if current['status'] == 'OPEN':
-        old_hits = set((before_copy.get('payload') or {}).get('management',{}).get('hit_targets',[])); new_hits = set((current.get('payload') or {}).get('management',{}).get('hit_targets',[]))
-        for idx in sorted(new_hits-old_hits):
-            mg = (current.get('payload') or {}).get('management',{}); await v5_runtime.robust_send_discord(core, f"🎯 ETH v7 TP{idx+1} 逐筆成交確認", v7_runtime._summary(core, current) + f"\n已實現 `{float(mg.get('realized_partial_r') or 0):+.2f}R`｜剩餘 `{float(mg.get('remaining_fraction') or 0):.0%}`。", 0x2ECC71)
+        for idx in sorted(new_hits - old_hits):
+            mg = (current.get('payload') or {}).get('management', {}); await v5_runtime.robust_send_discord(core, f"🎯 ETH v7 TP{idx+1} 逐筆成交確認", v7_runtime._summary(core, current) + f"\n已實現 `{float(mg.get('realized_partial_r') or 0):+.2f}R`｜剩餘 `{float(mg.get('remaining_fraction') or 0):.0%}`。", 0x2ECC71)
+    if current['status'] == 'CLOSED' and previous['status'] in ('PLANNED', 'OPEN'):
+        prefix = '入場後立即觸發風控｜' if previous['status'] == 'PLANNED' else ''
+        await v5_runtime.robust_send_discord(core, f"🛑 ETH v7 {prefix}{current.get('exit_reason')}", v7_runtime._summary(core, current) + f"\nNet `{float(current.get('realized_r') or 0):+.2f}R`｜出場 `{float(current.get('exit_price') or 0):,.2f}`\n同方向再入場進入 cooldown + 新結構 reset。", 0x2ECC71 if float(current.get('realized_r') or 0) >= 0 else 0xE74C3C)
+        return True
+    return False
+
+
+async def monitor_trades(core: Any) -> None:
+    initial = core.latest_signal()
+    if not initial: core.state['risk_monitor'] = {'ok': True, 'active': False, 'updated_at': int(time.time()), 'interval_seconds': TRADE_MONITOR_SECONDS, 'source': 'gate-trades'}; return
+    signal_id = initial['signal_id']; events = await fetch_trade_events(core); closed = False
+    for event in events:
+        previous = v7_runtime._signal_by_id(core, signal_id)
+        if not previous or previous['status'] not in ('PLANNED', 'OPEN'): break
+        process_trade_event(core, event)
+        current = v7_runtime._signal_by_id(core, signal_id)
+        if await _notify_transition(core, previous, current):
+            closed = True; break
+    current = v7_runtime._signal_by_id(core, signal_id); core.state['risk_monitor'] = {'ok': bool(events), 'active': bool(current and current['status'] in ('PLANNED','OPEN')), 'signal_id': signal_id, 'updated_at': int(time.time()), 'interval_seconds': TRADE_MONITOR_SECONDS, 'source': events[-1].get('source') if events else None, 'closed_this_cycle': closed}
 
 
 async def scan_worker_trade_monitor(core: Any) -> None:
