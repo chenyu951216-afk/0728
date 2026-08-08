@@ -9,6 +9,7 @@ from v5_runtime import install as install_v5
 from v7_timesafe_learning import install as install_timesafe_learning
 from v7_signal_learner import install as install_signal_learner
 from v7_execution_alignment import install as install_execution_alignment
+from v7_fine_execution import install as install_fine_execution
 from v7_runtime import install as install_v7
 from v7_reentry_guard import install as install_reentry_guard
 from v7_discord_runtime import install as install_discord_runtime
@@ -43,6 +44,9 @@ install_timesafe_learning(core)
 install_signal_learner(core)
 # Execution 30m/1h structures obey the same historical close-time eligibility.
 install_execution_alignment()
+# Entry/SL/TP lifecycle is replayed on 5m history instead of ambiguous 15m paths;
+# missing 5m paths are excluded from audit rather than mislabeled.
+install_fine_execution()
 # Point-in-time Signal OOF + independent validation + untouched execution audit.
 install_v7(core)
 # Losing-stop cooldown and structural reset / whipsaw quarantine.
