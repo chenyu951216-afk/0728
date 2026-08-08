@@ -7,6 +7,7 @@ import app as core
 from v5_async_runtime import install_async
 from v5_runtime import install as install_v5
 from v6_runtime import install as install_v6
+from v6_scan_runtime import install as install_v6_scan
 
 install_v5(core)
 install_async(core)
@@ -36,6 +37,7 @@ con.close()
 # v6 adds a second independent certification layer for the exact execution plan.
 # New signals require BOTH the signal Champion and its matching execution Champion.
 install_v6(core)
+install_v6_scan(core)
 
 app = core.app
 PORT = core.PORT
