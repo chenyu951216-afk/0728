@@ -7,6 +7,7 @@ import app as core
 from v5_async_runtime import install_async
 from v5_runtime import install as install_v5
 from v7_runtime import install as install_v7
+from v7_learning_guard import install as install_learning_guard
 from v7_trade_monitor import install as install_trade_monitor
 
 install_v5(core)
@@ -36,6 +37,8 @@ con.close()
 # v7 retires v6 execution metrics, uses point-in-time historical validation,
 # and separates live execution outcomes from signal-model labels.
 install_v7(core)
+# Avoid repeating identical CPU-heavy execution searches when no model/data changed.
+install_learning_guard(core)
 # Live Entry/TP/SL lifecycle is driven by ordered Gate public trades, not closed
 # 15m candles, so a stopped position is recognized within the monitor interval.
 install_trade_monitor(core)
