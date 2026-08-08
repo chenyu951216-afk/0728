@@ -6,15 +6,14 @@ from fastapi.responses import HTMLResponse
 import app as core
 from v5_async_runtime import install_async
 from v5_runtime import install as install_v5
-from v6_runtime import install as install_v6
-from v6_scan_runtime import install as install_v6_scan
+from v7_runtime import install as install_v7
 
 install_v5(core)
 install_async(core)
 
 # v5 changed the signal-learning target: strategies are trained separately by
-# LONG/SHORT and use strategy-specific passive-fill outcomes. Preserve old samples
-# for audit, but rebuild the active signal-model training set once.
+# LONG/SHORT and use strategy-specific point-in-time features. Preserve old rows
+# for audit and rebuild the active signal-model set once.
 if core.get_state('v5_sample_schema') != 2:
     con = core.db()
     con.execute('DROP TABLE IF EXISTS learning_samples_v4_archive')
@@ -28,16 +27,14 @@ if core.get_state('v5_sample_schema') != 2:
     core.set_state('last_train_ts_v5', 0)
     core.set_state('v5_sample_schema', 2)
 
-# Legacy non-directional Champions remain available for audit only.
 con = core.db()
 con.execute("UPDATE model_registry SET status='ARCHIVED' WHERE status='CHAMPION' AND direction NOT IN ('LONG','SHORT')")
 con.commit()
 con.close()
 
-# v6 adds a second independent certification layer for the exact execution plan.
-# New signals require BOTH the signal Champion and its matching execution Champion.
-install_v6(core)
-install_v6_scan(core)
+# v7 owns execution certification and live lifecycle monitoring. It explicitly
+# retires v6 execution metrics and prevents final-model historical self-scoring.
+install_v7(core)
 
 app = core.app
 PORT = core.PORT
