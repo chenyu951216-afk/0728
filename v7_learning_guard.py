@@ -29,15 +29,21 @@ async def learning_tick_guarded(core: Any) -> None:
     signature = [list(x) for x in v7_runtime._champion_signature(core)]
     old_signature = core.get_state('v7_execution_signal_signature', []) or []
     last_attempt = int(core.get_state('v7_execution_last_attempt_ts', 0) or 0)
-    need_exec = bool(signature) and (signature != old_signature or now - last_attempt >= 24 * 3600)
+    signature_changed = signature != old_signature
+    daily_refresh = now - last_attempt >= 24 * 3600
+    need_exec = bool(signature) and (signature_changed or daily_refresh)
     if need_exec:
-        results = await asyncio.to_thread(execution_v7.optimize_all, core, False)
+        # A new Signal Champion has no matching execution version, so normal mode
+        # is enough. If the Signal version is unchanged, force a daily re-audit so
+        # newly accumulated market history can actually evolve Entry/SL/TP policy.
+        results = await asyncio.to_thread(execution_v7.optimize_all, core, bool(daily_refresh and not signature_changed))
         core.state['execution_learning'] = {
             'version': v7_runtime.V7_VERSION,
             'results': results,
             'registry': v7_runtime._execution_status(core)[:50],
             'updated_at': datetime.now(core.timezone.utc).isoformat(),
             'throttled': True,
+            'reason': 'signal_version_changed' if signature_changed else 'daily_fresh_data_reaudit',
         }
         core.set_state('v7_execution_signal_signature', signature)
         core.set_state('v7_execution_last_attempt_ts', now)
@@ -50,7 +56,7 @@ async def boot_notice_ordered_trades(core: Any) -> None:
     ok = await v5_runtime.robust_send_discord(
         core,
         '✅ ETH Adaptive AI v7 已啟動',
-        'v6 Execution PF 已退役。v7 使用 point-in-time Signal OOF + 獨立 validation/audit；Entry/TP/SL 由 Gate 公開逐筆成交依時間順序監控；止損後有 cooldown + 新結構 reset；實盤 execution 結果獨立保存，不會污染 Signal Model。',
+        '舊 Execution PF 已退役。v7 使用 close-time-safe / point-in-time Signal OOF + 獨立 validation/audit；Entry/TP/SL 由 Gate 公開逐筆成交依時間順序監控；止損後有 cooldown + 新結構 reset；實盤 execution 結果獨立保存，不會污染 Signal Model。',
         0x3498DB,
     )
     if ok:
