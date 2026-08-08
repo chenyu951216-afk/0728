@@ -15,6 +15,8 @@ from v7_discord_runtime import install as install_discord_runtime
 from v7_live_health import install as install_live_health
 from v7_learning_guard import install as install_learning_guard
 from v7_trade_monitor import install as install_trade_monitor
+from v7_trade_feed import install as install_trade_feed
+from v7_monitor_gate import install as install_monitor_gate
 
 install_v5(core)
 install_async(core)
@@ -65,8 +67,11 @@ install_live_health(core)
 # while still doing a forced fresh-data execution re-audit once per day.
 install_learning_guard(core)
 # Live Entry/TP/SL lifecycle is driven by ordered Gate public trades, not closed
-# 15m candles, so a stopped position is recognized within the monitor interval.
+# 15m candles. The feed is paginated to prevent high-activity truncation.
 install_trade_monitor(core)
+install_trade_feed(core)
+# If the ordered feed cannot prove complete coverage, new positions are forbidden.
+install_monitor_gate(core)
 
 app = core.app
 PORT = core.PORT
