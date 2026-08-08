@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#08111f">
+<title>ETH Adaptive AI</title>
+<style>
+:root{--bg:#07101d;--panel:#0e1a2d;--panel2:#111f36;--line:#203455;--text:#edf4ff;--muted:#8fa4c4;--green:#52e2a7;--yellow:#ffd166;--red:#ff6b7d;--blue:#65a7ff;--purple:#9a7cff}
+*{box-sizing:border-box}html,body{margin:0;background:linear-gradient(180deg,#07101d,#091528 55%,#07101d);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}body{min-height:100vh}.wrap{max-width:1180px;margin:auto;padding:18px 14px 64px}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.brand h1{font-size:24px;margin:0 0 4px}.brand p{margin:0;color:var(--muted);font-size:13px}.badge{padding:8px 12px;border-radius:999px;background:#16243a;border:1px solid var(--line);font-weight:800;font-size:13px;white-space:nowrap}.ok{color:var(--green)}.warn{color:var(--yellow)}.bad{color:var(--red)}
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:12px}.card{grid-column:span 12;background:rgba(14,26,45,.92);border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 14px 40px rgba(0,0,0,.18)}.card h2{font-size:15px;margin:0 0 12px;color:#cfe0fb}.hero{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.metric{background:#0a1628;border:1px solid #1b3151;border-radius:14px;padding:12px}.metric .k{font-size:11px;color:var(--muted);margin-bottom:6px}.metric .v{font-size:20px;font-weight:850;line-height:1.1;word-break:break-word}.metric .s{font-size:11px;color:var(--muted);margin-top:5px}.big{font-size:28px!important}.long{color:var(--green)}.short{color:var(--red)}
+.progress{height:10px;background:#08111f;border:1px solid #203451;border-radius:999px;overflow:hidden}.bar{height:100%;background:linear-gradient(90deg,var(--blue),var(--purple));width:0}.row{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:8px 0;font-size:13px}.muted{color:var(--muted)}.pill{display:inline-flex;align-items:center;padding:5px 8px;border-radius:999px;background:#152641;border:1px solid #27446c;font-size:11px;margin:2px 3px 2px 0}.dot{width:7px;height:7px;border-radius:50%;background:var(--muted);margin-right:6px}.dot.y{background:var(--yellow)}.dot.g{background:var(--green)}
+.table{width:100%;border-collapse:collapse;font-size:12px}.table th{color:var(--muted);font-weight:600;text-align:left;padding:8px 6px;border-bottom:1px solid var(--line)}.table td{padding:9px 6px;border-bottom:1px solid #172945;vertical-align:top}.table tr:last-child td{border-bottom:0}.scroll{overflow:auto}.empty{padding:18px 0;color:var(--muted);font-size:13px;text-align:center}.targets{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:10px}.target{padding:9px;background:#0a1628;border:1px solid #1d3352;border-radius:11px;text-align:center}.target b{display:block;font-size:14px}.target small{color:var(--muted)}
+.actions{display:flex;gap:8px;flex-wrap:wrap}.btn{border:1px solid #31527e;background:#152744;color:var(--text);padding:9px 12px;border-radius:11px;font-weight:750;font-size:12px}.btn:active{transform:scale(.98)}input{background:#091629;border:1px solid #2a476f;border-radius:11px;padding:10px 11px;color:var(--text);font-size:14px;width:150px}.notice{padding:10px 12px;border:1px solid #364b6c;background:#111d31;border-radius:12px;color:#c5d4eb;font-size:12px;line-height:1.5}.notice.yellow{border-color:#645527;background:#211d0d;color:#f5dea0}.notice.green{border-color:#1f5e48;background:#0d241c;color:#a7f0d0}.notice.red{border-color:#6b3040;background:#271119;color:#ffb4bf}
+details{margin-top:10px}summary{cursor:pointer;color:var(--muted);font-size:12px}pre{white-space:pre-wrap;word-break:break-word;background:#07111f;border-radius:12px;padding:10px;font-size:11px;color:#bcd0ee;max-height:360px;overflow:auto}.footer{margin-top:18px;text-align:center;color:#6f85a6;font-size:11px;line-height:1.6}
+@media(min-width:760px){.span8{grid-column:span 8}.span7{grid-column:span 7}.span6{grid-column:span 6}.span5{grid-column:span 5}.span4{grid-column:span 4}}@media(max-width:680px){.hero{grid-template-columns:repeat(2,1fr)}.metric .v{font-size:17px}.big{font-size:23px!important}.targets{grid-template-columns:repeat(2,1fr)}.wrap{padding-top:max(14px,env(safe-area-inset-top))}.brand h1{font-size:21px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="brand"><h1>ETH Adaptive AI</h1><p>Top-down 自適應學習交易研究系統 · v4.2</p></div>
+    <div id="serviceBadge" class="badge warn">連線中</div>
+  </div>
+
+  <div class="grid">
+    <section class="card">
+      <div class="hero">
+        <div class="metric"><div class="k">ETH 即時價格</div><div id="price" class="v big">—</div><div id="updated" class="s">等待掃描</div></div>
+        <div class="metric"><div class="k">市場 Regime</div><div id="regime" class="v">—</div><div id="phase" class="s">—</div></div>
+        <div class="metric"><div class="k">AI 選擇方向</div><div id="direction" class="v">—</div><div id="strategy" class="s">—</div></div>
+        <div class="metric"><div class="k">AI 機率</div><div id="prob" class="v">—</div><div id="certified" class="s">尚未認證</div></div>
+      </div>
+      <div id="mainNotice" class="notice yellow" style="margin-top:12px">系統正在取得狀態…</div>
+    </section>
+
+    <section class="card span7">
+      <h2>🧠 AI 學習進度</h2>
+      <div class="row"><span>整體歷史學習</span><b id="learnPct">—</b></div><div class="progress"><div id="learnBar" class="bar"></div></div>
+      <div id="learningRows" style="margin-top:12px"></div>
+      <div class="row"><span class="muted">學習順序</span><span>1D/4H → 1H/30M → 15M/5M → 衍生品 → 出場後複盤</span></div>
+      <details><summary>查看完整 learning 原始資料</summary><pre id="learningRaw">—</pre></details>
+    </section>
+
+    <section class="card span5">
+      <h2>🏆 Champion / 模型狀態</h2>
+      <div id="modelSummary" class="empty">讀取模型中…</div>
+      <div class="actions" style="margin-top:12px"><button class="btn" onclick="refreshAll()">重新整理</button><button class="btn" onclick="manualScan()">立即掃描</button></div>
+    </section>
+
+    <section class="card span7">
+      <h2>📍 目前訊號 / 持倉計畫</h2>
+      <div id="signalBox" class="empty">目前沒有可交易訊號</div>
+    </section>
+
+    <section class="card span5">
+      <h2>💰 2% 風控倉位</h2>
+      <div class="row"><span class="muted">帳戶餘額 USDT</span><b id="equityNow">—</b></div>
+      <div class="actions"><input id="equityInput" inputmode="decimal" placeholder="例如 1000"><button class="btn" onclick="setEquity()">更新資金</button></div>
+      <div id="sizingBox" class="notice" style="margin-top:10px">有正式訊號後會依初始止損距離計算名目金額，使初始止損約等於總資金 2%。</div>
+    </section>
+
+    <section class="card span6">
+      <h2>📊 市場結構</h2>
+      <div id="marketStructure"></div>
+      <details><summary>查看 Regime 詳細資料</summary><pre id="regimeRaw">—</pre></details>
+    </section>
+
+    <section class="card span6">
+      <h2>🧾 衍生品 / 資料品質</h2>
+      <div id="derivativeBox"></div>
+      <details><summary>查看 derivatives 詳細資料</summary><pre id="derivRaw">—</pre></details>
+    </section>
+
+    <section class="card">
+      <h2>📈 各策略歷史學習結果</h2>
+      <div class="scroll"><table class="table"><thead><tr><th>策略</th><th>樣本</th><th>勝率</th><th>期望值</th><th>PF</th></tr></thead><tbody id="backtestRows"></tbody></table></div>
+    </section>
+
+    <section class="card">
+      <h2>🕘 最近訊號</h2>
+      <div class="scroll"><table class="table"><thead><tr><th>時間</th><th>狀態</th><th>策略</th><th>方向</th><th>機率</th><th>結果</th></tr></thead><tbody id="signalsRows"></tbody></table></div>
+    </section>
+  </div>
+  <div class="footer">Research / paper signal only · 不會自動送交易所訂單<br>頁面每 5 秒刷新即時狀態；模型與歷史學習在背景持續運作。</div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const num=(v,d=2)=>Number.isFinite(Number(v))?Number(v).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
+const pct=(v,d=1)=>Number.isFinite(Number(v))?(Number(v)*100).toFixed(d)+'%':'—';
+const ts=v=>{if(!v)return '—';let d=typeof v==='number'?new Date(v*1000):new Date(v);return isNaN(d)?'—':d.toLocaleString('zh-TW',{hour12:false})};
+const esc=s=>String(s??'—').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+function row(k,v){return `<div class="row"><span class="muted">${esc(k)}</span><b>${esc(v)}</b></div>`}
+function inferProgress(l){
+  const p=l?.progress||{};
+  for(const k of ['overall','progress','pct','percent','completion']){let v=Number(p[k]);if(Number.isFinite(v)){if(v<=1)v*=100;return Math.max(0,Math.min(100,v));}}
+  const vals=Object.values(p).filter(v=>typeof v==='number'&&v>=0&&v<=1);if(vals.length)return vals.reduce((a,b)=>a+b,0)/vals.length*100;
+  return 0;
+}
+function renderStatus(x){
+  const a=x.analysis||{},r=a.regime||{},s=a.selection||{},dq=a.data_quality||{};
+  $('serviceBadge').textContent=x.service==='OK'?'● 系統正常':x.service==='BOOTING'?'● 啟動中':'● '+(x.service||'未知');
+  $('serviceBadge').className='badge '+(x.service==='OK'?'ok':x.service==='DEGRADED'?'bad':'warn');
+  $('price').textContent=a.price?('$ '+num(a.price,2)):'—'; $('updated').textContent='更新 '+ts(x.updated_at);
+  $('regime').textContent=r.regime||'—'; $('phase').textContent=r.phase||'—';
+  $('direction').textContent=s.direction||'WAIT'; $('direction').className='v '+(s.direction==='LONG'?'long':s.direction==='SHORT'?'short':'');
+  $('strategy').textContent=(s.strategy||'等待學習').replaceAll('_',' '); $('prob').textContent=pct(s.probability);
+  $('certified').textContent=s.certified?`✓ 已認證 · ${s.model?.mode||'Champion'}`:`未認證 · ${s.model?.mode||'BASELINE'}`;
+  const notice=$('mainNotice');
+  if(s.tradeable){notice.className='notice green';notice.innerHTML=`<b>可交易研究訊號</b>｜${esc(s.direction)} · ${esc(s.strategy)} · ${pct(s.probability)}。系統仍採限價、不追價。`;}
+  else if(s.certified){notice.className='notice yellow';notice.innerHTML=`Champion 已存在，但目前條件未達交易門檻。現在維持 <b>WAIT</b>。`;}
+  else{notice.className='notice yellow';notice.innerHTML=`目前是 <b>BASELINE_UNCERTIFIED</b>，AI 還在歷史學習/驗證，因此 <b>tradeable = false</b> 是正常保護機制，不是故障。`;}
+  $('regimeRaw').textContent=JSON.stringify(r,null,2);
+  $('marketStructure').innerHTML=row('1D 方向',r.daily_direction===1?'多':r.daily_direction===-1?'空':'中性')+row('4H 方向',r.h4_direction===1?'多':r.h4_direction===-1?'空':'中性')+row('1H 方向',r.h1_direction===1?'多':r.h1_direction===-1?'空':'中性')+row('1D ADX',num(r.daily_adx,2))+row('4H ADX',num(r.h4_adx,2))+row('1H ADX',num(r.h1_adx,2))+row('波動排名',pct(r.volatility_rank));
+  const d=a.derivatives||{};$('derivRaw').textContent=JSON.stringify(d,null,2);
+  $('derivativeBox').innerHTML=row('資料品質',dq.score!=null?num(dq.score,1):'—')+row('Funding',d.funding!=null?num(d.funding,6):'—')+row('OI 變化',d.oi_available?pct(d.oi_change,2):'無資料')+row('Orderbook imbalance',d.book_available?num(d.book_imbalance,3):'無資料')+row('Spot/Perp basis',d.spot_perp_basis_bps!=null?num(d.spot_perp_basis_bps,2)+' bps':'—')+row('衍生品覆蓋率',pct(d.derivative_coverage));
+}
+function renderLearning(l){
+  const p=inferProgress(l);$('learnPct').textContent=p?p.toFixed(1)+'%':'建置中';$('learnBar').style.width=p+'%';$('learningRaw').textContent=JSON.stringify(l,null,2);
+  const pr=l?.progress||{};let html='';
+  const keys=Object.keys(pr).slice(0,8); if(keys.length){for(const k of keys){let v=pr[k];if(typeof v==='object')v=JSON.stringify(v);html+=row(k,String(v));}}
+  else html='<div class="empty">正在建立歷史資料與學習樣本…</div>';
+  if(l?.error)html+=`<div class="notice red">${esc(l.error)}</div>`;$('learningRows').innerHTML=html;
+}
+function renderSignal(sig,pos){
+  const s=sig||pos?.active||null;if(!s){$('signalBox').className='empty';$('signalBox').innerHTML='目前沒有 PLANNED / OPEN 訊號；AI 尚未認證前這是正常狀態。';$('equityNow').textContent=pos?.position_sizing?.equity_usdt??'—';return;}
+  $('signalBox').className='';const targets=Array.isArray(s.targets)?s.targets:[];
+  $('signalBox').innerHTML=`<div class="hero"><div class="metric"><div class="k">狀態</div><div class="v">${esc(s.status)}</div></div><div class="metric"><div class="k">方向</div><div class="v ${s.direction==='LONG'?'long':'short'}">${esc(s.direction)}</div></div><div class="metric"><div class="k">進場</div><div class="v">${num(s.entry,2)}</div></div><div class="metric"><div class="k">止損</div><div class="v">${num(s.current_stop??s.initial_stop,2)}</div></div></div><div class="targets">${targets.map((t,i)=>`<div class="target"><small>TP${i+1} · ${t.allocation??'—'}%</small><b>${num(t.price,2)}</b><small>${t.r!=null?num(t.r,2)+'R':''}</small></div>`).join('')}</div><div class="row"><span class="muted">策略</span><b>${esc(s.strategy)}</b></div><div class="row"><span class="muted">機率</span><b>${pct(s.probability)}</b></div>`;
+  const z=s.position_sizing||pos?.position_sizing||{};$('equityNow').textContent=z.equity_usdt!=null?num(z.equity_usdt,2)+' U':'—';$('sizingBox').innerHTML=z.notional_usdt?`初始止損風險 <b>${pct(z.risk_pct)}</b>｜建議名目金額 <b>${num(z.notional_usdt,2)} U</b>｜止損距離 ${pct(z.stop_pct,2)}`:'設定帳戶餘額後，有正式訊號時會自動計算 2% 風控名目金額。';
+}
+function renderModels(m){let html='';let found=false;for(const [name,rows] of Object.entries(m||{})){const c=(rows||[]).find(x=>x.status==='CHAMPION');if(c){found=true;html+=`<div class="notice green" style="margin-bottom:8px"><b>${esc(name.replaceAll('_',' '))}</b><br>Champion v${esc(c.version)} · PF ${num(c.profit_factor??c.pf,2)} · EV ${num(c.expectancy_r??c.expectancy,3)}R</div>`;}}if(!found)html='<div class="notice yellow"><b>尚無 Champion</b><br>系統正在累積樣本並做 purged walk-forward OOS 驗證。未通過前不會放行交易訊號。</div>';$('modelSummary').innerHTML=html;}
+function renderBacktest(b){let html='';for(const [k,v] of Object.entries(b||{}))html+=`<tr><td>${esc(k.replaceAll('_',' '))}</td><td>${v.n??0}</td><td>${pct(v.win_rate)}</td><td>${num(v.expectancy_r,3)}R</td><td>${num(v.profit_factor,2)}</td></tr>`;$('backtestRows').innerHTML=html||'<tr><td colspan="5" class="empty">尚無足夠學習樣本</td></tr>';}
+function renderSignals(rows){let html='';for(const s of (rows||[]).slice(0,12)){html+=`<tr><td>${ts(s.created_at)}</td><td>${esc(s.status)}</td><td>${esc((s.strategy||'').replaceAll('_',' '))}</td><td class="${s.direction==='LONG'?'long':'short'}">${esc(s.direction)}</td><td>${pct(s.probability)}</td><td>${s.realized_r!=null?num(s.realized_r,2)+'R':'—'}</td></tr>`}$('signalsRows').innerHTML=html||'<tr><td colspan="6" class="empty">目前尚無訊號紀錄</td></tr>';}
+async function j(url,opt){let r=await fetch(url,opt);if(!r.ok)throw new Error(`${url} ${r.status}`);return r.json()}
+async function refreshAll(){try{const [x,l,m,b,ss,p]=await Promise.all([j('/api/status'),j('/api/learning'),j('/api/models'),j('/api/backtest'),j('/api/signals?limit=30'),j('/api/position')]);renderStatus(x);renderLearning(l);renderModels(m);renderBacktest(b);renderSignals(ss);renderSignal(x.active_signal,p);}catch(e){$('serviceBadge').textContent='● 讀取失敗';$('serviceBadge').className='badge bad';$('mainNotice').className='notice red';$('mainNotice').textContent='Dashboard API 讀取失敗：'+e.message;}}
+async function setEquity(){const v=Number($('equityInput').value);if(!v||v<=0)return alert('請輸入大於 0 的 USDT 餘額');try{await j('/api/equity/'+encodeURIComponent(v),{method:'POST'});$('equityInput').value='';await refreshAll();}catch(e){alert(e.message)}}
+async function manualScan(){try{$('serviceBadge').textContent='● 掃描中';await j('/api/scan',{method:'POST'});await refreshAll();}catch(e){alert(e.message)}}
+refreshAll();setInterval(refreshAll,5000);
+</script>
+</body>
+</html>
