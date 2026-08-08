@@ -16,6 +16,7 @@ from v7_discord_runtime import install as install_discord_runtime
 from v7_live_health import install as install_live_health
 from v7_learning_guard import install as install_learning_guard
 from v7_trade_monitor import install as install_trade_monitor
+from v7_timeout_guard import install as install_timeout_guard
 from v7_trade_feed import install as install_trade_feed
 from v7_monitor_gate import install as install_monitor_gate
 
@@ -57,8 +58,10 @@ install_discord_runtime(core)
 install_live_health(core)
 # Throttled signal learning plus daily fresh-data execution re-audit.
 install_learning_guard(core)
-# Ordered public-trade lifecycle monitor, paginated for complete coverage.
+# Ordered public-trade lifecycle monitor, with the same max-hold timeout used in audit.
 install_trade_monitor(core)
+install_timeout_guard()
+# Paginated catch-up prevents deploy/restart gaps from silently missing a stop.
 install_trade_feed(core)
 # Fail closed: no new position unless the risk feed proves complete coverage.
 install_monitor_gate(core)
