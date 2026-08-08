@@ -47,7 +47,9 @@ async def fetch_trade_events_paginated(core: Any) -> list[dict[str, Any]]:
                     core.state['risk_feed_probe'] = {'gate_trades_ok': False, 'coverage_complete': False, 'error': f'pagination exceeded {MAX_PAGES_PER_CHUNK * PAGE_SIZE} trades in {CHUNK_SECONDS}s chunk', 'from': cursor, 'to': chunk_to, 'checked_at': now}
                     return []
                 if chunk_to >= now: break
-                cursor = chunk_to + 1
+                # Overlap the boundary second and deduplicate by trade identity so
+                # sub-second trades at the edge cannot fall through a +1s gap.
+                cursor = chunk_to
             ticker = await core.hub._json(client, core.hub.GATE + '/futures/usdt/tickers', {'contract': 'ETH_USDT'})
             if isinstance(ticker, list): ticker = ticker[0] if ticker else {}
             last = float((ticker or {}).get('last') or 0); events.sort(key=lambda x: (x['time'], x['trade_id']))
@@ -56,9 +58,6 @@ async def fetch_trade_events_paginated(core: Any) -> list[dict[str, Any]]:
             return events
         except Exception as exc:
             core.state['risk_feed_probe'] = {'gate_trades_ok': False, 'coverage_complete': False, 'error': f'Gate public trades: {exc}', 'from': start, 'to': now, 'checked_at': now}
-        # Fallback last price is visibility only. It may help close an obviously
-        # breached active position, but it never authorizes a new signal because
-        # risk_feed_probe stays false.
         try:
             data = await core.hub._json(client, core.hub.BYBIT + '/v5/market/kline', {'category': 'linear', 'symbol': 'ETHUSDT', 'interval': '1', 'limit': 1}); rows = ((data or {}).get('result') or {}).get('list') or []
             if rows:
