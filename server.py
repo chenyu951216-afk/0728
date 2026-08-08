@@ -7,6 +7,7 @@ import app as core
 from v5_async_runtime import install_async
 from v5_runtime import install as install_v5
 from v7_timesafe_learning import install as install_timesafe_learning
+from v7_signal_learner import install as install_signal_learner
 from v7_execution_alignment import install as install_execution_alignment
 from v7_runtime import install as install_v7
 from v7_learning_guard import install as install_learning_guard
@@ -39,6 +40,9 @@ con.close()
 # Historical HTF features now include a 1H/4H/1D bar only after its close was
 # actually knowable. Existing contaminated samples/Champions are archived.
 install_timesafe_learning(core)
+# Champion replacement compares stored clean OOS metrics rather than letting an
+# old final model score historical rows it may already have seen.
+install_signal_learner(core)
 # The execution simulator uses the same close-time eligibility for 30m/1h
 # structural invalidation levels.
 install_execution_alignment()
