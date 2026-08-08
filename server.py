@@ -10,6 +10,7 @@ from v7_timesafe_learning import install as install_timesafe_learning
 from v7_signal_learner import install as install_signal_learner
 from v7_execution_alignment import install as install_execution_alignment
 from v7_runtime import install as install_v7
+from v7_reentry_guard import install as install_reentry_guard
 from v7_discord_runtime import install as install_discord_runtime
 from v7_live_health import install as install_live_health
 from v7_learning_guard import install as install_learning_guard
@@ -52,6 +53,9 @@ install_execution_alignment()
 # v7 retires v6 execution metrics, uses point-in-time historical validation,
 # and separates live execution outcomes from signal-model labels.
 install_v7(core)
+# Stop-loss re-entry requires both elapsed cooldown and a genuinely new market
+# structure; repeated directional whipsaws trigger a longer quarantine.
+install_reentry_guard()
 # Every Discord alert reports the active runtime instead of a stale v5 footer.
 install_discord_runtime(core)
 # Clean historical validation is necessary but not sufficient: if a deployed
