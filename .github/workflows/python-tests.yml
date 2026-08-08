@@ -9,7 +9,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,7 +19,7 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
       - name: Compile
-        run: python -m py_compile app.py server.py adaptive_engine.py market_data.py derivative_data.py test_app.py
+        run: python -m py_compile app.py server.py adaptive_engine.py adaptive_v5.py market_data.py derivative_data.py v5_runtime.py test_app.py
       - name: Dashboard present
         run: test -s dashboard.html
       - name: Unit tests
