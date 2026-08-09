@@ -25,6 +25,7 @@ from v8_evolution import install as install_evolution
 from v8_execution_oof import install as install_execution_oof
 from v8_execution_walkforward import install as install_execution_walkforward
 from v8_notice import install as install_evolution_notice
+from v8_storage_guard import install as install_storage_guard
 
 install_v5(core)
 install_async(core)
@@ -52,8 +53,6 @@ install_fine_execution()
 install_v7(core)
 install_reentry_guard()
 install_discord_runtime(core)
-# Restore the 24h post-exit review loop; reviewed outcomes stay in the separate
-# execution-health store and never overwrite standardized Signal Model labels.
 install_post_exit(core)
 install_live_health(core)
 install_learning_guard(core)
@@ -61,21 +60,14 @@ install_trade_monitor(core)
 install_timeout_guard()
 install_trade_feed(core)
 install_monitor_gate(core)
-# Retire only deployable artifacts from the pre-evolution architecture. Historical
-# point-in-time samples stay intact and immediately seed the new Genome challengers.
 install_evolution_migration(core)
-# Evolution inherits every v7 safety gate. It may search broader model/execution
-# candidates, but cannot bypass point-in-time labels, untouched audit, live drift,
-# re-entry or ordered-trade monitoring.
 install_evolution(core)
-# Execution audit replays the same evolving Signal architecture. Each OOF fold
-# selects its genome only from that fold's past train/calibration data.
 install_execution_oof()
-# Replace the wasteful single final split with expanding chronological execution
-# walk-forward. Each fold tunes only on its past and is judged on the next unseen block.
 install_execution_walkforward(core)
-# Discord exposes exact model/execution versions and evolution evidence.
 install_evolution_notice(core)
+# Must be last: wraps the final learning/signal functions and blocks them when the
+# production SQLite path is not backed by a real persistent /data mount.
+install_storage_guard(core)
 
 app = core.app
 PORT = core.PORT
@@ -85,7 +77,7 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 
 @app.get('/', response_class=HTMLResponse)
 def dashboard() -> str:
-    return Path('dashboard_v7.html').read_text(encoding='utf-8')
+    return Path('dashboard_v72.html').read_text(encoding='utf-8')
 
 
 if __name__ == '__main__':
