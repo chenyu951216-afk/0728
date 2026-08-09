@@ -21,6 +21,7 @@ from v7_timeout_guard import install as install_timeout_guard
 from v7_trade_feed import install as install_trade_feed
 from v7_monitor_gate import install as install_monitor_gate
 from v8_evolution import install as install_evolution
+from v8_execution_oof import install as install_execution_oof
 
 install_v5(core)
 install_async(core)
@@ -61,6 +62,9 @@ install_monitor_gate(core)
 # broader strategy/model/execution candidates, but it cannot bypass point-in-time
 # labels, untouched execution audit, live drift quarantine, re-entry or risk-feed gates.
 install_evolution(core)
+# The execution audit must replay the same evolving Signal architecture. Each OOF
+# fold selects its genome only from that fold's historical train/calibration data.
+install_execution_oof()
 
 app = core.app
 PORT = core.PORT
