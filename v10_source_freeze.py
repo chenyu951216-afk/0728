@@ -21,27 +21,49 @@ def _complete(core: Any, key: str) -> bool:
     return bool(not rec.get('disabled') and rec.get('last_success_at') and int(rec.get('processed_through') or 0) >= int(time.time())-fin.READY_SAFETY_SECONDS)
 
 
-def _all_disabled(core: Any, keys: tuple[str,...]) -> bool:
-    recs=[fin._src(core,k) for k in keys]
-    return bool(recs and all(r and r.get('disabled') for r in recs))
+def _data_rows(core: Any, key: str) -> int:
+    rec=fin._src(core,key); detail=rec.get('detail') or {}
+    if key in ('gate_stats','bybit_oi'):
+        return int(detail.get('oi_rows') or 0)
+    if key in ('funding_bybit','funding_binance'):
+        return int(detail.get('funding_rows') or 0)
+    if key.startswith('cg_'):
+        return int(detail.get('rows') or 0)
+    return 0
+
+
+def _usable_complete(core: Any,key: str)->bool:
+    return bool(_complete(core,key) and _data_rows(core,key)>=2)
+
+
+def _settled_without_data(core: Any,key: str)->bool:
+    rec=fin._src(core,key)
+    return bool(rec.get('disabled') or (_complete(core,key) and _data_rows(core,key)==0))
+
+
+def _all_settled_without_usable(core: Any, keys: tuple[str,...]) -> bool:
+    return bool(all(_settled_without_data(core,k) for k in keys))
 
 
 def _freeze_if_ready(core: Any) -> None:
     state=fin._load(core)
     if state.get('core_frozen'):
         return
-    oi=[k for k in OI_KEYS if _complete(core,k)]
-    funding=[k for k in FUNDING_KEYS if _complete(core,k)]
-    oi_settled=bool(oi) or _all_disabled(core,OI_KEYS)
-    funding_settled=bool(funding) or _all_disabled(core,FUNDING_KEYS)
+    # A cursor that reached today but produced zero rows is not a usable core source.
+    # This prevents a provider that silently returned empty pages from opening replay
+    # before Gate/Bybit/Binance have actually delivered historical evidence.
+    oi=[k for k in OI_KEYS if _usable_complete(core,k)]
+    funding=[k for k in FUNDING_KEYS if _usable_complete(core,k)]
+    oi_settled=bool(oi) or _all_settled_without_usable(core,OI_KEYS)
+    funding_settled=bool(funding) or _all_settled_without_usable(core,FUNDING_KEYS)
     if not (oi_settled and funding_settled):
         return
     state['core_frozen']=True
     state['frozen_core_oi']=oi
     state['frozen_core_funding']=funding
-    state['frozen_enrichment']=[k for k in ('gate_stats','cg_liq','cg_book','cg_oi') if _complete(core,k)]
+    state['frozen_enrichment']=[k for k in ('gate_stats','cg_liq','cg_book','cg_oi') if _usable_complete(core,k)]
     state['frozen_at']=int(time.time())
-    state['freeze_reason']='at least one complete OI source and one complete funding source; optional enrichment only if already complete'
+    state['freeze_reason']='usable complete OI/funding sources frozen; zero-row completed sources count only as explicit missingness'
     fin._save(core,state)
     core.set_state('final_frozen_core_oi',oi); core.set_state('final_frozen_core_funding',funding)
     core.set_state('final_frozen_enrichment',state['frozen_enrichment'])
@@ -54,9 +76,9 @@ def _upgrade_if_all_settled(core: Any) -> None:
     tracked=OI_KEYS+FUNDING_KEYS+OPTIONAL_KEYS
     if not all(_complete(core,k) or fin._src(core,k).get('disabled') for k in tracked):
         return
-    target_oi=[k for k in OI_KEYS if _complete(core,k)]
-    target_funding=[k for k in FUNDING_KEYS if _complete(core,k)]
-    target_enrichment=[k for k in ('gate_stats','cg_oi','cg_liq','cg_book') if _complete(core,k)]
+    target_oi=[k for k in OI_KEYS if _usable_complete(core,k)]
+    target_funding=[k for k in FUNDING_KEYS if _usable_complete(core,k)]
+    target_enrichment=[k for k in ('gate_stats','cg_oi','cg_liq','cg_book') if _usable_complete(core,k)]
     current=(set(state.get('frozen_core_oi') or []),set(state.get('frozen_core_funding') or []),set(state.get('frozen_enrichment') or []))
     target=(set(target_oi),set(target_funding),set(target_enrichment))
     if target==current:
@@ -137,7 +159,8 @@ def install(core: Any)->None:
         result=dict(result or {}); state=fin._load(core)
         result.update({'core_frozen':bool(state.get('core_frozen')),'frozen_core_oi':state.get('frozen_core_oi',[]),
                        'frozen_core_funding':state.get('frozen_core_funding',[]),'frozen_enrichment':state.get('frozen_enrichment',[]),
-                       'core_ready_through':core_ready_through(core),'generation':state.get('generation',1)})
+                       'core_ready_through':core_ready_through(core),'generation':state.get('generation',1),
+                       'source_rows':{k:_data_rows(core,k) for k in OI_KEYS+FUNDING_KEYS+OPTIONAL_KEYS}})
         core.state['derivative_multisource']=result
         return result
     core.derivative_history.backfill_tick=backfill
@@ -146,4 +169,5 @@ def install(core: Any)->None:
     v9_readiness._coinglass_ready_through=lambda c: core_ready_through(c)
     v9_final._strict_derivative_extras=lambda h,ts: strict_extras(core,h,ts)
     strict=core.state.setdefault('strict_replay',{}); strict['source_freeze']={'enabled':True,'core_sources_frozen_before_replay':True,
-        'mid_generation_provider_join_forbidden':True,'late_provider_upgrade_rebuilds_labels_not_raw_data':True,'single_generation_manager':True}
+        'mid_generation_provider_join_forbidden':True,'late_provider_upgrade_rebuilds_labels_not_raw_data':True,'single_generation_manager':True,
+        'zero_row_cursor_cannot_certify_core_source':True}
