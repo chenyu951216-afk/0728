@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 import v9_final
+import v9_readiness
 
 
 PARITY_VERSION = '8.0.2-20260809'
@@ -64,6 +65,10 @@ def install(core: Any) -> None:
 
     core._raw_derivatives = canonical_live_derivatives
     core.create_signal = strict_fresh_create
+    # Normalize component-visible version strings as well as the top-level runtime.
+    # Their closures read these module globals at request/notification time.
+    v9_final.FINAL_VERSION = PARITY_VERSION
+    v9_readiness.READINESS_VERSION = PARITY_VERSION
     core.state.setdefault('strict_replay', {})['live_parity'] = {
         'version': PARITY_VERSION,
         'closed_15m_reference_price': True,
