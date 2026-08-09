@@ -9,9 +9,11 @@ class Core:
 
 
 class LegacyRuntimeIsolationTests(unittest.TestCase):
-    def test_v7_disables_legacy_boot_and_execution_paths(self):
+    def test_modern_runtime_disables_legacy_boot_and_execution_paths(self):
         self.assertFalse(runtime._legacy_runtime_allowed(Core('7.0.0-20260809')))
         self.assertFalse(runtime._legacy_runtime_allowed(Core('7.1.0')))
+        self.assertFalse(runtime._legacy_runtime_allowed(Core('8.0.0-20260809')))
+        self.assertFalse(runtime._legacy_runtime_allowed(Core('9.0.0')))
 
     def test_legacy_runtime_remains_available_when_intentional(self):
         self.assertTrue(runtime._legacy_runtime_allowed(Core('6.0.0-20260808')))
