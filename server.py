@@ -36,6 +36,7 @@ from v9_multisource_derivatives import install as install_multisource_derivative
 from v9_multisource_integrity import install as install_multisource_integrity
 from v10_final_integrity import install as install_final_integrity
 from v10_source_freeze import install as install_source_freeze
+from v10_overfit_guard import install as install_overfit_guard
 from v10_notice import install as install_final_notice
 
 install_storage_guard_early(core)
@@ -87,7 +88,7 @@ install_storage_guard(core)
 install_stability(core)
 # Final layers are installed last. Older modules cannot overwrite event-time replay,
 # non-starving scheduling, source-consistent derivatives, full-span storage, live
-# parity, untouched execution audit, or the single modern Discord boot notice.
+# parity, untouched execution audit, anti-overfit certification, or Discord identity.
 install_strict_final(core)
 install_replay_readiness(core)
 install_training_store(core)
@@ -97,6 +98,7 @@ install_multisource_derivatives(core)
 install_multisource_integrity(core)
 install_final_integrity(core)
 install_source_freeze(core)
+install_overfit_guard(core)
 install_final_notice(core)
 
 RUNTIME_VERSION = '8.1.0-20260809'
@@ -125,14 +127,13 @@ def dashboard() -> str:
         html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.1.0 Final Replay Integrity')
         .replace(
             'Walk-Forward Evolution · Storage Identity Guard · Subsystem-Isolated Fail-Closed',
-            'Strict Event-Time Replay · Frozen Multi-Source Semantics · 5m Event Labels · Full-Span Evolution · Untouched Audit',
+            'Strict Event-Time Replay · Frozen Sources · 5m Event Labels · Horizon-Clustered OOS · Untouched Audit',
         )
     )
     html = html.replace(
         '<div id="learnMeta" style="margin-top:12px"></div><div id="learnError"></div></section>',
         '<div id="learnMeta" style="margin-top:12px"></div><div id="learnError"></div><details><summary>查看衍生品來源 / readiness</summary><pre id="derivSources">—</pre></details></section>',
     )
-    # Surface exact data-source/readiness state instead of an unexplained WAIT.
     html = html.replace(
         "row('最新市場',tm(rp.latest_market_ts));$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:'';",
         "row('最新市場',tm(rp.latest_market_ts))+row('Learning phase',lr.phase||'—')+row('本輪新增樣本',lr.v5_samples_added??0)+row('價格補資料目標',lr.price_backfill_target?(lr.price_backfill_target.asset+' '+lr.price_backfill_target.tf):'無')+row('Derivative ready through',tm(lr.derivative_ready_through))+row('Core source freeze',(lr.derivative_backfill||{}).core_frozen?'已鎖定':'等待核心來源完成')+row('Frozen OI',((lr.derivative_backfill||{}).frozen_core_oi||[]).join(', ')||'—')+row('Frozen funding',((lr.derivative_backfill||{}).frozen_core_funding||[]).join(', ')||'—')+row('Frozen enrichment',((lr.derivative_backfill||{}).frozen_enrichment||[]).join(', ')||'—');$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:lr.blocker?`<div class=\"notice y\"><b>目前學習狀態：</b>${esc(lr.blocker)}</div>`:'';if($('derivSources'))$('derivSources').textContent=JSON.stringify((lr.derivative_backfill||{}),null,2);"
