@@ -27,6 +27,7 @@ from v8_execution_walkforward import install as install_execution_walkforward
 from v8_notice import install as install_evolution_notice
 from v8_storage_guard import install as install_storage_guard, install_early as install_storage_guard_early
 from v8_stability import install as install_stability
+from v9_final import install as install_strict_final
 
 install_storage_guard_early(core)
 install_v5(core)
@@ -75,6 +76,9 @@ install_execution_walkforward(core)
 install_evolution_notice(core)
 install_storage_guard(core)
 install_stability(core)
+# Final layer is deliberately installed last so no legacy module can overwrite
+# strict event-time replay, DEV-only evolution, or the final runtime identity.
+install_strict_final(core)
 
 app = core.app
 PORT = core.PORT
