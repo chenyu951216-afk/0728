@@ -14,10 +14,11 @@ async def evolution_boot_notice(core: Any) -> None:
     ok = await v5_runtime.robust_send_discord(
         core,
         '🧬 ETH Adaptive AI Evolution 已啟動',
-        'Runtime `7.1 Evolution`\n'
-        'Signal：每個策略×方向會在 purged point-in-time folds 內競爭不同 feature subset、模型複雜度、正則化、近期資料權重與 learned threshold。\n'
-        'Execution：Entry / SL / 結構週期 / TP1~TP4 / 分批 / BE / 鎖利 / timeout 會在更寬候選空間搜尋，但仍必須通過 validation + untouched audit。\n'
-        'Live：每筆新單完整記錄 Net R、估算 USDT、MFE/MAE、TP/SL 路徑；先做 deployment evidence / drift，累積到安全批次才重做 execution audit。單筆輸贏不會直接改 Signal Model。',
+        f"Runtime `{str(v8_evolution.EVOLUTION_VERSION).replace('-20260809','')}`\n"
+        'Signal：每個策略×方向會在 purged point-in-time folds 內競爭 feature subset、模型複雜度、正則化、近期資料權重與 learned threshold。\n'
+        'Execution：使用 expanding chronological walk-forward；每一折只能用更早歷史挑 Entry/SL/TP，下一段才是 untouched audit，最後合併所有未見折驗證 PF/EV/CI/DD/近期穩定度。\n'
+        'Live：每筆新單完整記錄 Net R、估算 USDT、MFE/MAE、TP/SL 路徑；先做 deployment evidence / drift，累積到安全批次才重做 execution audit。單筆輸贏不會直接改 Signal Model。\n'
+        '歷史 K 線、衍生品與 point-in-time 樣本沿用，不需刪除或重抓。',
         0x8E6CEF,
     )
     if ok:
@@ -56,12 +57,13 @@ async def notify_execution_results(core: Any, results: list[dict[str, Any]]) -> 
         await v5_runtime.robust_send_discord(
             core,
             f"🧭 Execution Champion 進化｜{x['strategy']} {x['direction']} Exec v{int(x.get('execution_version') or 0)}",
-            f"Signal model v`{int(x.get('model_version') or 0)}`｜point-in-time evolving OOF → DEV tune → chronological validation → untouched audit\n"
-            f"Audit PF `{float(x.get('profit_factor') or 0):.2f}`｜EV `{float(x.get('expectancy_r') or 0):+.3f}R`｜CI05 `{float(x.get('ev_bootstrap_05') or 0):+.3f}R`｜勝率 `{float(x.get('win_rate') or 0):.1%}`\n"
-            f"fills `{int(x.get('oos_fills') or 0)}`｜fill `{float(x.get('fill_rate') or 0):.1%}`｜DD `{float(x.get('max_drawdown_r') or 0):.1f}R`｜成本 `{float(x.get('estimated_all_in_cost_bps') or 0):.1f}bps`\n"
+            f"Signal model v`{int(x.get('model_version') or 0)}`｜expanding walk-forward point-in-time OOF\n"
+            f"Audit folds `{int(x.get('qualified_walkforward_folds') or 0)}`｜合計 fills `{int(x.get('oos_fills') or 0)}`｜fill `{float(x.get('fill_rate') or 0):.1%}`\n"
+            f"Aggregate PF `{float(x.get('profit_factor') or 0):.2f}`｜EV `{float(x.get('expectancy_r') or 0):+.3f}R`｜CI05 `{float(x.get('ev_bootstrap_05') or 0):+.3f}R`｜勝率 `{float(x.get('win_rate') or 0):.1%}`\n"
+            f"最差 fold EV `{float(x.get('worst_fold_ev_r') or 0):+.3f}R`｜最近 fold EV `{float(x.get('recent_fold_ev_r') or 0):+.3f}R`｜最近 PF `{float(x.get('recent_fold_pf') or 0):.2f}`｜DD `{float(x.get('max_drawdown_r') or 0):.1f}R`\n"
             f"Entry `{float(policy.get('entry_atr') or 0):.3f} ATR`｜Stop `{float(policy.get('stop_atr') or 0):.2f} ATR`｜結構 `{policy.get('structure_mode') or '—'}`\n"
             f"TP `{targets}`｜分批 `{alloc}`｜TP2鎖 `{float(policy.get('lock_after_tp2_r') or 0):.2f}R`｜TP3鎖 `{float(policy.get('lock_after_tp3_r') or 0):.2f}R`\n"
-            f"掛單 `{int(policy.get('expire_bars') or 0)}×15m`｜最長持有 `{int(policy.get('max_hold_bars') or 0)}×15m`。",
+            f"掛單 `{int(policy.get('expire_bars') or 0)}×15m`｜最長持有 `{int(policy.get('max_hold_bars') or 0)}×15m`｜成本 `{float(x.get('estimated_all_in_cost_bps') or 0):.1f}bps`。",
             0x2ECC71,
         )
 
