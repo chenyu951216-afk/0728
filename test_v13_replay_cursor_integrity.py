@@ -36,6 +36,24 @@ class ReplayCursorIntegrityTests(unittest.TestCase):
     def test_only_explicit_warmup_is_skippable(self):
         self.assertEqual(guard._decision_state(htf_ready=False, future_ready=False, continuity_ready=False), 'WARMUP')
 
+    def test_feature_builder_contract_calls_builder_instead_of_calling_result_dict(self):
+        calls = []
+        class FeatureCore:
+            def build_features(self, m15, h1, btc, regime, extras):
+                calls.append((m15, h1, btc, regime, extras))
+                return {'ema_gap': 1.0, 'source_agreement_bps': 99.0}
+        core = FeatureCore()
+        out = guard._build_model_features(core, [{'c': 1}], [{'c': 1}], [{'c': 1}], {'regime': 'R'}, {'funding': 0.0})
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(out['ema_gap'], 1.0)
+        self.assertEqual(out['source_agreement_bps'], 0.0)
+
+    def test_feature_builder_contract_rejects_non_callable_builder_with_clear_error(self):
+        class BrokenCore:
+            build_features = {'wrong': 'dict'}
+        with self.assertRaisesRegex(TypeError, 'must be callable'):
+            guard._build_model_features(BrokenCore(), [], [], [], {}, {})
+
     def test_integrity_reset_preserves_raw_cache_and_dataset_marker(self):
         with tempfile.NamedTemporaryFile(suffix='.db') as f:
             core = Core(f.name)
