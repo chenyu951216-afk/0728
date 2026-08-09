@@ -55,22 +55,39 @@ async def learning_tick_v5_async(core) -> None:
     samples = 0
     training = []
     execution_results = []
+    scheduler_errors: list[str] = []
     legacy_runtime = _legacy_runtime_allowed(core)
 
     # Keep repairing raw price history when necessary, but under modern runtimes this
     # target is no longer an exclusive branch that can starve all learning forever.
     if chosen:
-        backfill_result = await core.backfill_one(*chosen)
+        try:
+            backfill_result = await core.backfill_one(*chosen)
+        except Exception as exc:
+            backfill_result = {'asset': chosen[0], 'tf': chosen[1], 'error': str(exc), 'isolated': not legacy_runtime}
+            scheduler_errors.append(f'price_backfill {chosen[0]} {chosen[1]}: {exc}')
+            if legacy_runtime:
+                raise
 
     # Legacy v5/v6 keep their historical sequencing. Modern v7+ always attempts the
     # independent derivative pipeline and Strict Replay after any price repair pass.
     if not chosen or not legacy_runtime:
         core.derivative_history.set_db_path(core.DB_PATH)
-        derivative_result = await core.derivative_history.backfill_tick(
-            core.hub,
-            core.START_TS,
-            pages=max(1, min(5, core.BACKFILL_PAGES_PER_TICK)),
-        )
+        try:
+            derivative_result = await core.derivative_history.backfill_tick(
+                core.hub,
+                core.START_TS,
+                pages=max(1, min(5, core.BACKFILL_PAGES_PER_TICK)),
+            )
+        except Exception as exc:
+            derivative_result = {'error': str(exc), 'isolated': not legacy_runtime, 'used_previous_safe_watermark': not legacy_runtime}
+            scheduler_errors.append(f'derivative_backfill: {exc}')
+            if legacy_runtime:
+                raise
+
+        # Even when today's provider request failed, modern Strict Replay may continue
+        # only up to the last previously certified derivative watermark. The readiness
+        # wrapper remains the hard authority and returns zero if no safe room exists.
         samples = await asyncio.to_thread(v5_runtime.generate_learning_samples_v5, core)
         training = await asyncio.to_thread(v5_runtime.train_v5, core)
         if training:
@@ -103,6 +120,7 @@ async def learning_tick_v5_async(core) -> None:
     multisource = core.state.get('derivative_multisource') or {}
     ready_through = multisource.get('ready_through')
     derivative_errors = list(multisource.get('errors') or [])
+    combined_errors = scheduler_errors + derivative_errors
     if samples > 0:
         phase = 'STRICT_REPLAY_ADVANCING'
         blocker = None
@@ -114,7 +132,7 @@ async def learning_tick_v5_async(core) -> None:
         blocker = f'price history repair still active for {chosen[0]} {chosen[1]}; modern replay continues probing independently'
     else:
         phase = 'STRICT_REPLAY_PROBING'
-        blocker = derivative_errors[0] if derivative_errors else None
+        blocker = combined_errors[0] if combined_errors else None
 
     core.state['learning'] = {
         'progress': progress,
@@ -129,6 +147,7 @@ async def learning_tick_v5_async(core) -> None:
         'derivative_multisource': multisource,
         'derivative_ready_through': ready_through,
         'derivative_errors': derivative_errors,
+        'scheduler_errors': scheduler_errors,
         'derivative_replay_watermark': watermark,
         'source_generation_reset': generation_reset,
         'live_samples_added': live_added,
@@ -152,6 +171,7 @@ async def learning_tick_v5_async(core) -> None:
         'training_off_event_loop': True,
         'legacy_execution_disabled_under_v7_plus': not legacy_runtime,
         'price_backfill_cannot_starve_modern_replay': not legacy_runtime,
+        'provider_failure_cannot_exceed_previous_safe_watermark': not legacy_runtime,
     }
 
     # A modern process must emit only its own startup notice. Older boot notices stay
