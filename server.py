@@ -39,6 +39,7 @@ from v10_source_freeze import install as install_source_freeze
 from v10_overfit_guard import install as install_overfit_guard
 from v10_notice import install as install_final_notice
 from v11_sqlite_stability import install as install_sqlite_stability
+from v12_clean_baseline import install as install_clean_baseline
 
 install_storage_guard_early(core)
 install_v5(core)
@@ -88,9 +89,8 @@ install_evolution_notice(core)
 install_storage_guard(core)
 install_stability(core)
 # Final layers are installed last. Older modules cannot overwrite event-time replay,
-# non-starving scheduling, source-consistent derivatives, full-span storage, live
-# parity, untouched execution audit, anti-overfit certification, Discord identity,
-# or the final SQLite/runtime contention guard.
+# source-consistent derivatives, anti-overfit certification, SQLite stability, or the
+# final clean-dataset provenance gate.
 install_strict_final(core)
 install_replay_readiness(core)
 install_training_store(core)
@@ -103,8 +103,9 @@ install_source_freeze(core)
 install_overfit_guard(core)
 install_final_notice(core)
 install_sqlite_stability(core)
+install_clean_baseline(core)
 
-RUNTIME_VERSION = '8.1.1-20260809'
+RUNTIME_VERSION = '8.2.0-20260809'
 core.state['runtime_version'] = RUNTIME_VERSION
 core.state.setdefault('strict_replay', {})['runtime'] = RUNTIME_VERSION
 core.state['strict_replay']['learning_scheduler'] = {
@@ -115,7 +116,7 @@ core.state['strict_replay']['learning_scheduler'] = {
     'core_sources_frozen_before_replay': True,
     'optional_source_cannot_deadlock': True,
 }
-core.app.version = '8.1.1'
+core.app.version = '8.2.0'
 
 app = core.app
 PORT = core.PORT
@@ -127,11 +128,45 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 def dashboard() -> str:
     html = Path('dashboard_v721.html').read_text(encoding='utf-8')
     html = (
-        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.1.1 Final Replay Integrity')
+        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.2.0 Final Clean Baseline')
         .replace(
             'Walk-Forward Evolution · Storage Identity Guard · Subsystem-Isolated Fail-Closed',
-            'Strict Replay · Frozen Sources · 5m Event Labels · Anti-Overfit OOS · SQLite Contention Guard',
+            'Clean Dataset Provenance · Strict Replay · 5m Event Labels · Anti-Overfit OOS · SQLite Guard',
         )
+    )
+    # Mobile layout: long runtime states must wrap inside their own card instead of
+    # stretching the two-column grid and making the page look broken on iPhone widths.
+    html = html.replace(
+        '.s{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.45}',
+        '.s{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.45;overflow-wrap:anywhere;word-break:break-word}',
+    )
+    html = html.replace(
+        '.health{background:var(--card2);border:1px solid #1a3355;border-radius:13px;padding:11px}',
+        '.health{background:var(--card2);border:1px solid #1a3355;border-radius:13px;padding:11px;min-width:0;overflow:hidden}',
+    )
+    html = html.replace(
+        '.health .stat{font-size:13px;font-weight:900;margin:6px 0}',
+        '.health .stat{font-size:13px;font-weight:900;margin:6px 0;overflow-wrap:anywhere;word-break:break-word;line-height:1.25}',
+    )
+    html = html.replace(
+        '@media(max-width:390px){.healthgrid{grid-template-columns:1fr}.row b{max-width:60%}}',
+        '@media(max-width:560px){.healthgrid{grid-template-columns:1fr}.row b{max-width:62%}.health{padding:13px}.health .stat{font-size:14px}.top{gap:8px}.badge{padding:7px 10px;font-size:11px}}@media(max-width:360px){.hero{grid-template-columns:1fr}.row b{max-width:58%}}',
+    )
+    html = html.replace(
+        '<div class="k">模型信心 / 門檻</div>',
+        '<div id="probTitle" class="k">研究分數（未認證）</div>',
+    )
+    html = html.replace(
+        '<div id="storageBox"></div><div id="storageNotice" class="notice"></div>',
+        '<div id="storageBox"></div><div id="storageNotice" class="notice"></div><div id="baselineNotice" class="notice">讀取 Dataset provenance…</div>',
+    )
+    html = html.replace(
+        "function hcard(name,h){h=h||{};let status=h.status||'BOOTING',cls=status==='OK'?'ok':status==='BOOTING'?'warn':'bad';return `<div class=\"health\"><div class=\"name\">${esc(name)}</div><div class=\"stat ${cls}\">${esc(status)}</div><div class=\"tiny\">連續錯誤 ${h.consecutive_errors||0}<br>最後成功 ${tm(h.last_success_at)}${h.last_error?`<br>錯誤：${esc(h.last_error)}`:''}</div></div>`}",
+        "function hcard(name,h){h=h||{};let status=h.status||'BOOTING',good=['OK','RUNNING'].includes(status),waiting=status==='BOOTING'||status==='RETRYING'||status.startsWith('WAITING_'),cls=good?'ok':waiting?'warn':'bad';return `<div class=\"health\"><div class=\"name\">${esc(name)}</div><div class=\"stat ${cls}\">${esc(status)}</div><div class=\"tiny\">連續錯誤 ${h.consecutive_errors||0}<br>最後成功 ${tm(h.last_success_at)}${h.last_error?`<br>錯誤：${esc(h.last_error)}`:''}</div></div>`}",
+    )
+    html = html.replace(
+        "$('prob').textContent=pc(sel.probability);$('threshold').textContent=`門檻 ${pc(sel.threshold)} · ${sel.validation_stack||'等待認證'}`;",
+        "let certified=(c||[]).some(z=>z.strategy===sel.strategy&&z.direction===sel.direction);$('probTitle').textContent=certified?'Champion 信心 / 門檻':'研究分數（未認證）';$('prob').textContent=pc(sel.probability);$('threshold').textContent=certified?`門檻 ${pc(sel.threshold)} · ${sel.validation_stack||'已認證'}`:'尚無同方向 Signal Champion · 此分數僅供研究，不能觸發下單';",
     )
     html = html.replace(
         '<div id="learnMeta" style="margin-top:12px"></div><div id="learnError"></div></section>',
@@ -139,7 +174,17 @@ def dashboard() -> str:
     )
     html = html.replace(
         "row('最新市場',tm(rp.latest_market_ts));$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:'';",
-        "row('最新市場',tm(rp.latest_market_ts))+row('Learning phase',lr.phase||lr.runtime_status||'—')+row('本輪新增樣本',lr.v5_samples_added??0)+row('價格補資料目標',lr.price_backfill_target?(lr.price_backfill_target.asset+' '+lr.price_backfill_target.tf):'無')+row('Derivative ready through',tm(lr.derivative_ready_through))+row('Core source freeze',(lr.derivative_backfill||{}).core_frozen?'已鎖定':'等待核心來源完成')+row('Frozen OI',((lr.derivative_backfill||{}).frozen_core_oi||[]).join(', ')||'—')+row('Frozen funding',((lr.derivative_backfill||{}).frozen_core_funding||[]).join(', ')||'—')+row('Frozen enrichment',((lr.derivative_backfill||{}).frozen_enrichment||[]).join(', ')||'—');$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:lr.blocker?`<div class=\"notice y\"><b>目前學習狀態：</b>${esc(lr.blocker)}</div>`:'';if($('derivSources'))$('derivSources').textContent=JSON.stringify((lr.derivative_backfill||{}),null,2);"
+        "row('最新市場',tm(rp.latest_market_ts))+row('Learning phase',lr.phase||lr.runtime_status||'—')+row('本輪新增樣本',lr.v5_samples_added??0)+row('價格補資料目標',lr.price_backfill_target?(lr.price_backfill_target.asset+' '+lr.price_backfill_target.tf):'無')+row('Derivative ready through',tm(lr.derivative_ready_through))+row('Core source freeze',(lr.derivative_backfill||{}).core_frozen?'已鎖定':'等待核心來源完成')+row('Frozen OI',((lr.derivative_backfill||{}).frozen_core_oi||[]).join(', ')||'—')+row('Frozen funding',((lr.derivative_backfill||{}).frozen_core_funding||[]).join(', ')||'—')+row('Frozen enrichment',((lr.derivative_backfill||{}).frozen_enrichment||[]).join(', ')||'—');$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:lr.blocker?`<div class=\"notice y\"><b>目前學習狀態：</b>${esc(lr.blocker)}</div>`:'';if($('derivSources'))$('derivSources').textContent=JSON.stringify((lr.derivative_backfill||{}),null,2);",
+    )
+    # Dataset provenance is deliberately fetched separately so the old dashboard API
+    # contract does not need another migration.
+    html = html.replace(
+        "async function setEq(){",
+        "async function refreshBaseline(){try{let b=await fetch('/api/v12/baseline').then(r=>r.json()),el=$('baselineNotice');if(!el)return;el.className='notice '+(b.clean?'g':'r');el.innerHTML=b.clean?`<b>Final Clean Baseline：CLEAN</b><br>Dataset ID：${esc(b.dataset_id||'—')}<br>此資料集可進行正式 Champion 認證。`:`<b>Final Clean Baseline：LEGACY_CARRYOVER</b><br>${esc(b.reason||'舊 raw cache 存在')}<br><b>目前正式 Champion 認證與新單已 fail-closed。</b>`}catch(e){let el=$('baselineNotice');if(el){el.className='notice r';el.textContent='Dataset provenance 讀取失敗：'+String(e)}}}\nasync function setEq(){",
+    )
+    html = html.replace(
+        "refresh();setInterval(refresh,5000);",
+        "refresh();refreshBaseline();setInterval(refresh,5000);setInterval(refreshBaseline,10000);",
     )
     return html
 
