@@ -28,15 +28,10 @@ from v8_notice import install as install_evolution_notice
 from v8_storage_guard import install as install_storage_guard, install_early as install_storage_guard_early
 from v8_stability import install as install_stability
 
-# Before any migration, production must never silently switch from the mounted
-# database to /tmp.
 install_storage_guard_early(core)
 install_v5(core)
 install_async(core)
 
-# Legacy v5 metadata can occasionally be absent even though the newer point-in-time
-# schema and its samples are already valid. Never destructively clear newer samples
-# just because the legacy bookkeeping key is missing.
 if core.get_state('v5_sample_schema') != 2:
     pit_schema = int(core.get_state('point_in_time_sample_schema', 0) or 0)
     con = core.db()
@@ -78,10 +73,7 @@ install_evolution(core)
 install_execution_oof()
 install_execution_walkforward(core)
 install_evolution_notice(core)
-# Storage guard wraps the final learning/signal implementations.
 install_storage_guard(core)
-# Stability must be last: it isolates scan/risk/learning/execution/Discord failures
-# and supervises the already-installed 7.2 runtime without bypassing safety gates.
 install_stability(core)
 
 app = core.app
@@ -92,7 +84,7 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 
 @app.get('/', response_class=HTMLResponse)
 def dashboard() -> str:
-    return Path('dashboard_v72.html').read_text(encoding='utf-8')
+    return Path('dashboard_v721.html').read_text(encoding='utf-8')
 
 
 if __name__ == '__main__':
