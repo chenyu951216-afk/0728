@@ -7,6 +7,10 @@ import v5_runtime
 import v9_multisource_derivatives as ms
 
 
+RECOVERY_SUCCESS_STREAK = 2
+RECOVERY_NEAR_NOW_SECONDS = 2 * ms.INTERVAL
+
+
 def _latest_for_source(history: Any, source: str, metric: str) -> int | None:
     con = history._con()
     row = con.execute(
@@ -57,6 +61,29 @@ def _reset_learning_generation(core: Any, source: str, reason: str) -> None:
     core.state.setdefault('learning', {})['source_generation_reset'] = state['last_generation_reset']
 
 
+def _reactivate_if_fully_recovered(core: Any, source: str, rec: dict[str, Any]) -> bool:
+    if not rec.get('disabled'):
+        return False
+    cursor = int(rec.get('cursor') or core.START_TS)
+    near_now = cursor >= int(time.time()) - RECOVERY_NEAR_NOW_SECONDS
+    stable = int(rec.get('success_streak') or 0) >= RECOVERY_SUCCESS_STREAK
+    if not (near_now and stable):
+        return False
+
+    state = ms._load(core)
+    current = dict((state.get('sources') or {}).get(source) or rec)
+    current.update({
+        'disabled': False,
+        'disabled_reason': None,
+        'mode': 'recovered_for_new_replay_generation',
+        'reactivated_at': int(time.time()),
+    })
+    state.setdefault('sources', {})[source] = current
+    ms._save(core, state)
+    _reset_learning_generation(core, source, 'historical source recovered through present; replay upgraded to richer source set')
+    return True
+
+
 async def _source_safe_cg_forward(core: Any, metric: str, source_key: str, fn: Any, pages: int) -> dict[str, Any]:
     history = core.derivative_history
     cursor = ms._cursor(core, source_key)
@@ -98,6 +125,8 @@ def install(core: Any) -> None:
         is_disabled = bool(rec.get('disabled'))
         if not was_disabled and is_disabled:
             _reset_learning_generation(c, source, str(rec.get('disabled_reason') or rec.get('last_error') or 'source disabled'))
+        elif was_disabled and bool(kwargs.get('ok')):
+            _reactivate_if_fully_recovered(c, source, rec)
         return rec
 
     ms._record = generation_safe_record
@@ -106,3 +135,5 @@ def install(core: Any) -> None:
     policy['source_isolated_readiness_cursors'] = True
     policy['source_set_frozen_per_replay_generation'] = True
     policy['source_change_resets_labels_not_raw_market_data'] = True
+    policy['disabled_sources_keep_background_probing'] = True
+    policy['fully_recovered_source_triggers_richer_replay_generation'] = True
