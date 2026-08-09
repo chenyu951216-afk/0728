@@ -7,19 +7,22 @@ import v5_runtime
 import v6_runtime
 
 
-def _legacy_boot_notices_allowed(core) -> bool:
-    """Only legacy runtimes may announce v5/v6 startup messages.
+def _legacy_runtime_allowed(core) -> bool:
+    """Return True only when an older runtime is intentionally active.
 
-    v7 still reuses this module's learning orchestration for historical replay and
-    compatibility, but that must never make the background learner claim that an
-    older runtime has started. Daily reports and learning continue normally.
+    v7 reuses this module for historical Signal learning orchestration, but legacy
+    v5/v6 boot notices and the v6 execution optimizer must not run inside v7.
     """
     runtime = str(core.state.get('runtime_version') or '')
     return not runtime.startswith('7.')
 
 
 async def learning_tick_v5_async(core) -> None:
-    """Run replay, signal-model fitting and execution-policy fitting off the live loop."""
+    """Run replay and signal-model fitting off the live loop.
+
+    Under v7 this function is only the historical Signal-learning stage. The v7
+    learning guard owns execution-policy optimization separately.
+    """
     live_added = await asyncio.to_thread(core.ingest_completed_live_samples)
     con = core.db()
     progress = core.bootstrap_progress(con)
@@ -37,6 +40,7 @@ async def learning_tick_v5_async(core) -> None:
     samples = 0
     training = []
     execution_results = []
+    legacy_runtime = _legacy_runtime_allowed(core)
 
     if chosen:
         backfill_result = await core.backfill_one(*chosen)
@@ -52,15 +56,16 @@ async def learning_tick_v5_async(core) -> None:
         if training:
             await v5_runtime._notify_promotions(core, training)
 
-        # Execution optimization is deliberately throttled. A newly promoted signal
-        # Champion gets evaluated immediately; rejected policies are reconsidered at
-        # most every six hours as new samples arrive, never every learning tick.
-        last_exec = int(core.get_state('v6_last_exec_opt_ts', 0) or 0)
-        if training or time.time() - last_exec >= 6 * 3600:
-            execution_results = await asyncio.to_thread(v6_runtime.optimize_execution, core, False)
-            core.set_state('v6_last_exec_opt_ts', int(time.time()))
-            if execution_results:
-                await v6_runtime.notify_execution_results(core, execution_results)
+        # v6 execution optimization exists only for an intentionally active legacy
+        # runtime. v7 has its own independent point-in-time execution audit and must
+        # never run this older optimizer in the background.
+        if legacy_runtime:
+            last_exec = int(core.get_state('v6_last_exec_opt_ts', 0) or 0)
+            if training or time.time() - last_exec >= 6 * 3600:
+                execution_results = await asyncio.to_thread(v6_runtime.optimize_execution, core, False)
+                core.set_state('v6_last_exec_opt_ts', int(time.time()))
+                if execution_results:
+                    await v6_runtime.notify_execution_results(core, execution_results)
 
     con = core.db()
     progress = core.bootstrap_progress(con)
@@ -94,11 +99,12 @@ async def learning_tick_v5_async(core) -> None:
         'model_schema_version': 2,
         'execution_schema_version': 1,
         'training_off_event_loop': True,
+        'legacy_execution_disabled_under_v7': not legacy_runtime,
     }
 
-    # v7 reuses this learning worker, but it must never emit legacy startup claims.
-    # Older runtimes retain their diagnostics when they are intentionally active.
-    if _legacy_boot_notices_allowed(core):
+    # A v7 process must emit only its own startup notice. Older boot notices stay
+    # available solely when those older runtimes are intentionally launched.
+    if legacy_runtime:
         await v5_runtime.maybe_boot_notice(core)
         if core.get_state('discord_boot_version_v6') != v6_runtime.V6_VERSION:
             ok = await v5_runtime.robust_send_discord(
