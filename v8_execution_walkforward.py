@@ -4,15 +4,16 @@ import json
 import math
 import os
 import statistics
-import time
 from collections import Counter
 from typing import Any
 
 import adaptive_v5 as signal
 import execution_v7 as execution
+import v8_evolution
 
+WALKFORWARD_VERSION = '7.2.0-20260809'
 WALKFORWARD_SCHEMA = 1
-MIN_WF_OPPORTUNITIES = max(100, int(os.getenv('EXECUTION_WF_MIN_OPPORTUNITIES', '120')))
+MIN_WF_OPPORTUNITIES = max(110, int(os.getenv('EXECUTION_WF_MIN_OPPORTUNITIES', '126')))
 MIN_WF_FOLDS = max(3, int(os.getenv('EXECUTION_WF_MIN_FOLDS', '3')))
 MIN_FOLD_AUDIT_FILLS = max(6, int(os.getenv('EXECUTION_WF_MIN_FOLD_FILLS', '8')))
 TOP_DEV_POLICIES = max(4, min(12, int(os.getenv('EXECUTION_WF_TOP_POLICIES', '6'))))
@@ -34,7 +35,7 @@ def _selection_score(stats: dict[str, float], worst_segment_ev: float, opportuni
 
 
 def _select_policy(history: list[dict[str, Any]], data: dict[str, Any], strategy: str, direction: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]] | None:
-    """Select a policy using only historical opportunities strictly before the audit fold."""
+    """Select a policy using only opportunities strictly before the next audit fold."""
     if len(history) < 72:
         return None
     purge = max(5, min(12, len(history) // 18))
@@ -79,7 +80,7 @@ def _walkforward_ranges(n: int) -> list[tuple[int, int]]:
         return []
     initial = max(72, int(n * .42))
     remaining = n - initial
-    if remaining < 48:
+    if remaining < 54:
         return []
     folds = min(5, max(MIN_WF_FOLDS, remaining // 24))
     folds = min(folds, max(1, remaining // 18))
@@ -180,7 +181,6 @@ def optimize_pair_walkforward(core: Any, strategy: str, direction: str, force: b
     ci_low, ci_high = execution._block_bootstrap_ev(pnls, seed=172)
     shrunk_ev = float(aggregate['expectancy_r']) * int(aggregate['fills']) / max(int(aggregate['fills']) + 80, 1)
     fold_evs = [float(x['audit']['expectancy_r']) for x in qualified_folds]
-    fold_pfs = [float(x['audit']['profit_factor']) for x in qualified_folds]
     worst_fold_ev = min(fold_evs)
     profitable_fold_ratio = sum(x > 0 for x in fold_evs) / len(fold_evs)
     recent_fold = qualified_folds[-1]['audit']
@@ -263,7 +263,8 @@ def optimize_pair_walkforward(core: Any, strategy: str, direction: str, force: b
     con.close()
     return {
         'strategy': strategy, 'direction': direction, 'model_version': model_version,
-        'execution_version': version, 'status': 'CHAMPION' if core_ok else 'REJECTED', **metrics,
+        'execution_version': version, 'status': 'CHAMPION' if core_ok else 'REJECTED',
+        'policy': deployment_policy, **metrics,
     }
 
 
@@ -297,11 +298,15 @@ def install(core: Any) -> None:
     _migrate(core)
     execution.optimize_pair = optimize_pair_walkforward
     execution.optimize_all = optimize_all_walkforward
+    v8_evolution.EVOLUTION_VERSION = WALKFORWARD_VERSION
+    core.state['runtime_version'] = WALKFORWARD_VERSION
+    core.app.version = '7.2.0'
     core.state['execution_validation_method'] = 'EXPANDING_WALK_FORWARD_AGGREGATED_UNTOUCHED_AUDITS'
     if not any(getattr(r, 'path', None) == '/api/v8/execution-walkforward' for r in core.app.router.routes):
         @core.app.get('/api/v8/execution-walkforward')
         def execution_walkforward_status() -> dict[str, Any]:
             return {
+                'runtime': WALKFORWARD_VERSION,
                 'schema': WALKFORWARD_SCHEMA,
                 'minimum_opportunities': MIN_WF_OPPORTUNITIES,
                 'minimum_folds': MIN_WF_FOLDS,
