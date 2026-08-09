@@ -88,7 +88,14 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 
 @app.get('/', response_class=HTMLResponse)
 def dashboard() -> str:
-    return Path('dashboard_v721.html').read_text(encoding='utf-8')
+    html = Path('dashboard_v721.html').read_text(encoding='utf-8')
+    return (
+        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.0 Strict Replay')
+        .replace(
+            'Walk-Forward Evolution · Storage Identity Guard · Subsystem-Isolated Fail-Closed',
+            'Strict Event-Time Replay · DEV-only Evolution · Untouched Audit · Storage Guard · Fail-Closed',
+        )
+    )
 
 
 if __name__ == '__main__':
