@@ -33,6 +33,7 @@ from v9_training_store import install as install_training_store
 from v9_live_parity import install as install_live_parity
 from v9_derivative_gate import install as install_derivative_gate
 from v9_multisource_derivatives import install as install_multisource_derivatives
+from v9_multisource_integrity import install as install_multisource_integrity
 
 install_storage_guard_early(core)
 install_v5(core)
@@ -84,13 +85,14 @@ install_stability(core)
 # Final layers are deliberately installed last so no legacy module can overwrite
 # strict event-time replay, DEV-only evolution, derivative readiness, full-span
 # training storage, live feature parity, resilient/multi-source derivative gating,
-# or runtime identity.
+# source-generation integrity, or runtime identity.
 install_strict_final(core)
 install_replay_readiness(core)
 install_training_store(core)
 install_live_parity(core)
 install_derivative_gate(core)
 install_multisource_derivatives(core)
+install_multisource_integrity(core)
 
 app = core.app
 PORT = core.PORT
