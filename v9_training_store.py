@@ -42,26 +42,22 @@ def _decode(rows: list[Any]) -> list[dict[str, Any]]:
 
 
 def normalized_add_sample(self: Any, r: dict[str, Any]) -> None:
-    _ensure(self.con)
+    # install() guarantees the normalized snapshot table exists before workers run.
+    # Cache the last T because strict replay writes all strategy x direction outcomes
+    # for the same decision consecutively; the feature JSON only needs one insert.
     ts = int(r['ts'])
-    features = json.dumps(r['features'], separators=(',', ':'))
-    self.con.execute(
-        'INSERT OR IGNORE INTO learning_feature_snapshots(ts,features) VALUES(?,?)',
-        (ts, features),
-    )
-    # The same feature snapshot is shared by all strategy x direction outcomes at T.
-    # A tiny reference avoids storing the identical JSON fourteen times.
+    if getattr(self, '_strict_last_feature_ts', None) != ts:
+        features = json.dumps(r['features'], separators=(',', ':'))
+        self.con.execute(
+            'INSERT OR IGNORE INTO learning_feature_snapshots(ts,features) VALUES(?,?)',
+            (ts, features),
+        )
+        self._strict_last_feature_ts = ts
     self.con.execute(
         'INSERT OR IGNORE INTO learning_samples(ts,strategy,direction,regime,phase,features,success,pnl_r,mfe_r,mae_r,source_quality) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
         (ts, r['strategy'], r['direction'], r['regime'], r['phase'], f'@{ts}', int(r['success']),
          float(r['pnl_r']), float(r['mfe_r']), float(r['mae_r']), float(r.get('source_quality', 100.0))),
     )
-
-
-def _where(direction: str | None) -> tuple[str, tuple[Any, ...]]:
-    if direction:
-        return 'strategy=? AND direction=?', (direction,)
-    return 'strategy=?', ()
 
 
 def full_span_samples(self: Any, strategy: str, limit: int = MODEL_MAX_ROWS, direction: str | None = None) -> list[dict[str, Any]]:
@@ -92,6 +88,8 @@ def full_span_samples(self: Any, strategy: str, limit: int = MODEL_MAX_ROWS, dir
         self._strict_sampling_info = {
             'strategy': strategy, 'direction': direction, 'db_rows': total, 'model_rows': len(rows),
             'mode': 'ALL_ROWS', 'max_rows': cap,
+            'span_start_ts': int(rows[0][0]) if rows else None,
+            'span_end_ts': int(rows[-1][0]) if rows else None,
         }
         return _decode(rows)
 
@@ -101,7 +99,7 @@ def full_span_samples(self: Any, strategy: str, limit: int = MODEL_MAX_ROWS, dir
         args + [recent_n - 1],
     ).fetchone()
     if not boundary_row:
-        return _ORIGINAL_SAMPLES(self, strategy, cap, direction)
+        raise RuntimeError(f'cannot determine full-span sampling boundary for {strategy} {direction}')
     boundary = int(boundary_row[0])
     old_count = int(self.con.execute(
         'SELECT COUNT(*) FROM learning_samples ls WHERE ' + condition + ' AND ls.ts<?',
