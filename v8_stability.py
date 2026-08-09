@@ -10,7 +10,7 @@ import v5_runtime
 import v7_trade_monitor as trade_monitor
 
 
-STABILITY_VERSION = '7.2.1-20260809'
+STABILITY_VERSION = '8.0.1-20260809'
 SCAN_RETRIES = 2
 SCAN_STALE_SECONDS = 180
 SCAN_DEGRADE_AFTER = 3
@@ -83,7 +83,6 @@ def _refresh_service(core: Any) -> None:
         core.state['service'] = 'DEGRADED'
         core.state['error'] = ' | '.join(critical)[:1800]
     else:
-        # Preserve BOOTING before the first successful scan; otherwise clear stale global errors.
         if market.get('last_success_at') is not None:
             core.state['service'] = 'OK'
             core.state['error'] = None
@@ -155,7 +154,6 @@ async def _safe_discord_poll(core: Any) -> None:
         await v5_runtime.poll_discord_commands(core)
         _ok(core, 'discord_poll')
     except Exception as exc:
-        # Discord command polling must never mark market/risk execution as failed.
         _err(core, 'discord_poll', exc, status='DEGRADED')
 
 
@@ -183,10 +181,17 @@ def install(core: Any) -> None:
     async def stable_live_worker() -> None:
         next_scan = 0.0
         try:
+            runtime = str(core.state.get('runtime_version') or STABILITY_VERSION)
+            strict = core.state.get('strict_replay') or {}
+            strict_text = (
+                'Strict Replay 啟用：HTF 僅收線後可用、未來路徑只能在決策鎖定後揭露、Execution outer audit 不得回頭改參數。'
+                if strict.get('htf_close_time_required') else
+                'Point-in-time / fail-closed 安全模式啟用。'
+            )
             await v5_runtime.robust_send_discord(
                 core,
-                '✅ ETH Adaptive AI 7.2.1 Stability 已啟動',
-                'Market scan、ordered-trade risk monitor、learning、Execution Audit、Discord polling 已拆成獨立健康域。單次外部 API timeout 會重試且禁止新開單，不再直接把整套系統誤判為故障；持久資料庫也禁止 silent /tmp fallback。',
+                f'✅ ETH Adaptive AI {runtime.replace("-20260809", "")} 已啟動',
+                'Market scan、ordered-trade risk monitor、learning、Execution Audit、Discord polling 已拆成獨立健康域。單次外部 API timeout 會重試且禁止新開單；持久資料庫禁止 silent /tmp fallback。\n' + strict_text,
                 0x3498DB,
             )
         except Exception as exc:
@@ -206,7 +211,7 @@ def install(core: Any) -> None:
     execution_v7.optimize_all = stable_optimize_all
     core.scan_worker = stable_live_worker
     core.state['runtime_version'] = STABILITY_VERSION
-    core.app.version = '7.2.1'
+    core.app.version = '8.0.1'
     core.state['stability_mode'] = 'SUBSYSTEM_ISOLATED_FAIL_CLOSED'
     core.state['subsystem_health'] = {
         'market_scan': _health(core, 'market_scan'),
@@ -221,7 +226,8 @@ def install(core: Any) -> None:
         def stability_status() -> dict[str, Any]:
             _refresh_service(core)
             return {
-                'runtime': STABILITY_VERSION,
+                'runtime': str(core.state.get('runtime_version') or STABILITY_VERSION),
+                'stability_component_version': STABILITY_VERSION,
                 'mode': core.state.get('stability_mode'),
                 'service': core.state.get('service'),
                 'global_error': core.state.get('error'),
