@@ -126,6 +126,10 @@ def strict_extras(core: Any,history: Any,decision_ts: int)->dict[str,float]:
 
 
 def install(core: Any)->None:
+    # v10_source_freeze is the sole owner of replay-generation/source-set changes.
+    # The earlier helper inside v10_final_integrity must not independently reset a
+    # generation after samples start, otherwise two managers can race each other.
+    fin._maybe_freeze_enrichment=lambda c: None
     original_backfill=core.derivative_history.backfill_tick
     async def backfill(hub:Any,start_ts:int,pages:int=4):
         result=await original_backfill(hub,start_ts,pages)
@@ -142,4 +146,4 @@ def install(core: Any)->None:
     v9_readiness._coinglass_ready_through=lambda c: core_ready_through(c)
     v9_final._strict_derivative_extras=lambda h,ts: strict_extras(core,h,ts)
     strict=core.state.setdefault('strict_replay',{}); strict['source_freeze']={'enabled':True,'core_sources_frozen_before_replay':True,
-        'mid_generation_provider_join_forbidden':True,'late_provider_upgrade_rebuilds_labels_not_raw_data':True}
+        'mid_generation_provider_join_forbidden':True,'late_provider_upgrade_rebuilds_labels_not_raw_data':True,'single_generation_manager':True}
