@@ -29,6 +29,8 @@ from v8_storage_guard import install as install_storage_guard, install_early as 
 from v8_stability import install as install_stability
 from v9_final import install as install_strict_final
 from v9_readiness import install as install_replay_readiness
+from v9_training_store import install as install_training_store
+from v9_live_parity import install as install_live_parity
 
 install_storage_guard_early(core)
 install_v5(core)
@@ -78,9 +80,12 @@ install_evolution_notice(core)
 install_storage_guard(core)
 install_stability(core)
 # Final layers are deliberately installed last so no legacy module can overwrite
-# strict event-time replay, DEV-only evolution, derivative readiness, or runtime identity.
+# strict event-time replay, DEV-only evolution, derivative readiness, full-span
+# training storage, live feature parity, or runtime identity.
 install_strict_final(core)
 install_replay_readiness(core)
+install_training_store(core)
+install_live_parity(core)
 
 app = core.app
 PORT = core.PORT
@@ -92,10 +97,10 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 def dashboard() -> str:
     html = Path('dashboard_v721.html').read_text(encoding='utf-8')
     return (
-        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.0.1 Strict Replay')
+        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.0.2 Final Strict Replay')
         .replace(
             'Walk-Forward Evolution · Storage Identity Guard · Subsystem-Isolated Fail-Closed',
-            'Strict Event-Time Replay · Derivative Watermark · DEV-only Evolution · Untouched Audit · Fail-Closed',
+            'Strict Event-Time Replay · Full-Span Learning · Live/History Parity · Untouched Audit · Fail-Closed',
         )
     )
 
