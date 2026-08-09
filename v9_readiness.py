@@ -14,12 +14,14 @@ def _coinglass_ready_through(core: Any) -> int | None:
     if not getattr(history, 'coinglass_key', ''):
         return None
     keys = ('cg_cursor:oi_usd', 'cg_cursor:liq_long_usd', 'cg_cursor:book_imbalance')
-    cursors = [int(history._get_state(k, core.START_TS) or core.START_TS) for k in keys]
+    cursors = [max(int(core.START_TS), int(history._get_state(k, core.START_TS) or core.START_TS)) for k in keys]
     # Each cursor points to the next interval/window that still needs work. With the
     # strict 4h availability lag, using the minimum cursor as the decision watermark
     # is conservative: a decision cannot request an aggregated value from beyond the
     # region already processed (including provider windows explicitly found empty).
-    return min(cursors) if cursors else core.START_TS
+    # Corrupt/stale cursors below LEARNING_START_TS are clamped to the start boundary,
+    # which can only delay replay and therefore fails closed.
+    return min(cursors) if cursors else int(core.START_TS)
 
 
 def install(core: Any) -> None:
@@ -27,7 +29,7 @@ def install(core: Any) -> None:
 
     def watermarked_generate(c: Any, batch: int = 500) -> int:
         ready = _coinglass_ready_through(c)
-        current = int(c.get_state(v5_runtime.REPLAY_STATE_KEY, c.START_TS) or c.START_TS)
+        current = max(int(c.START_TS), int(c.get_state(v5_runtime.REPLAY_STATE_KEY, c.START_TS) or c.START_TS))
         if ready is None:
             c.state.setdefault('learning', {})['derivative_replay_watermark'] = {
                 'mode': 'explicit_missingness_no_coinglass',
@@ -53,7 +55,7 @@ def install(core: Any) -> None:
             return 0
 
         n = int(original(c, min(int(batch), int(allowed))) or 0)
-        after = int(c.get_state(v5_runtime.REPLAY_STATE_KEY, current) or current)
+        after = max(int(c.START_TS), int(c.get_state(v5_runtime.REPLAY_STATE_KEY, current) or current))
         if after > int(ready):
             # This should be unreachable because of the safety margin. Fail loudly
             # instead of silently certifying samples whose derivative readiness is
@@ -78,7 +80,7 @@ def install(core: Any) -> None:
         @core.app.get('/api/v9/readiness')
         def readiness_status() -> dict[str, Any]:
             ready = _coinglass_ready_through(core)
-            current = int(core.get_state(v5_runtime.REPLAY_STATE_KEY, core.START_TS) or core.START_TS)
+            current = max(int(core.START_TS), int(core.get_state(v5_runtime.REPLAY_STATE_KEY, core.START_TS) or core.START_TS))
             return {
                 'runtime': READINESS_VERSION,
                 'coinglass_enabled': bool(getattr(core.derivative_history, 'coinglass_key', '')),
