@@ -34,6 +34,8 @@ from v9_live_parity import install as install_live_parity
 from v9_derivative_gate import install as install_derivative_gate
 from v9_multisource_derivatives import install as install_multisource_derivatives
 from v9_multisource_integrity import install as install_multisource_integrity
+from v10_final_integrity import install as install_final_integrity
+from v10_source_freeze import install as install_source_freeze
 
 install_storage_guard_early(core)
 install_v5(core)
@@ -82,10 +84,9 @@ install_execution_walkforward(core)
 install_evolution_notice(core)
 install_storage_guard(core)
 install_stability(core)
-# Final layers are deliberately installed last so no legacy module can overwrite
-# strict event-time replay, DEV-only evolution, derivative readiness, full-span
-# training storage, live feature parity, resilient/multi-source derivative gating,
-# source-generation integrity, or runtime identity.
+# Final layers are installed last. Older modules cannot overwrite event-time replay,
+# non-starving scheduling, source-consistent derivatives, full-span storage, live
+# parity, or untouched execution audit rules.
 install_strict_final(core)
 install_replay_readiness(core)
 install_training_store(core)
@@ -93,10 +94,10 @@ install_live_parity(core)
 install_derivative_gate(core)
 install_multisource_derivatives(core)
 install_multisource_integrity(core)
+install_final_integrity(core)
+install_source_freeze(core)
 
-# v8.0.5 fixes learning-scheduler starvation: an incomplete/failed legacy price
-# backfill can no longer prevent independent derivative backfill + Strict Replay.
-RUNTIME_VERSION = '8.0.5-20260809'
+RUNTIME_VERSION = '8.1.0-20260809'
 core.state['runtime_version'] = RUNTIME_VERSION
 core.state.setdefault('strict_replay', {})['runtime'] = RUNTIME_VERSION
 core.state['strict_replay']['learning_scheduler'] = {
@@ -104,8 +105,10 @@ core.state['strict_replay']['learning_scheduler'] = {
     'price_backfill_failure_isolated': True,
     'derivative_failure_uses_only_previous_safe_watermark': True,
     'readiness_diagnostics_preserved': True,
+    'core_sources_frozen_before_replay': True,
+    'optional_source_cannot_deadlock': True,
 }
-core.app.version = '8.0.5'
+core.app.version = '8.1.0'
 
 app = core.app
 PORT = core.PORT
@@ -117,17 +120,20 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 def dashboard() -> str:
     html = Path('dashboard_v721.html').read_text(encoding='utf-8')
     html = (
-        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.0.5 Final Strict Replay')
+        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.1.0 Final Replay Integrity')
         .replace(
             'Walk-Forward Evolution · Storage Identity Guard · Subsystem-Isolated Fail-Closed',
-            'Strict Event-Time Replay · Non-Blocking Multi-Source Learning · Full-Span Evolution · Untouched Audit · Fail-Closed',
+            'Strict Event-Time Replay · Frozen Multi-Source Semantics · 5m Event Labels · Full-Span Evolution · Untouched Audit',
         )
     )
-    # Surface the exact scheduler/readiness blocker instead of showing Learning=OK
-    # while samples remain at zero with no explanation.
+    html = html.replace(
+        '<div id="learnMeta" style="margin-top:12px"></div><div id="learnError"></div></section>',
+        '<div id="learnMeta" style="margin-top:12px"></div><div id="learnError"></div><details><summary>查看衍生品來源 / readiness</summary><pre id="derivSources">—</pre></details></section>',
+    )
+    # Surface exact data-source/readiness state instead of an unexplained WAIT.
     html = html.replace(
         "row('最新市場',tm(rp.latest_market_ts));$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:'';",
-        "row('最新市場',tm(rp.latest_market_ts))+row('Learning phase',lr.phase||'—')+row('本輪新增樣本',lr.v5_samples_added??0)+row('價格補資料目標',lr.price_backfill_target?(lr.price_backfill_target.asset+' '+lr.price_backfill_target.tf):'無')+row('Derivative ready through',tm(lr.derivative_ready_through));$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:lr.blocker?`<div class=\"notice y\"><b>目前學習狀態：</b>${esc(lr.blocker)}</div>`:'';"
+        "row('最新市場',tm(rp.latest_market_ts))+row('Learning phase',lr.phase||'—')+row('本輪新增樣本',lr.v5_samples_added??0)+row('價格補資料目標',lr.price_backfill_target?(lr.price_backfill_target.asset+' '+lr.price_backfill_target.tf):'無')+row('Derivative ready through',tm(lr.derivative_ready_through))+row('Core source freeze',(lr.derivative_backfill||{}).core_frozen?'已鎖定':'等待核心來源完成')+row('Frozen OI',((lr.derivative_backfill||{}).frozen_core_oi||[]).join(', ')||'—')+row('Frozen funding',((lr.derivative_backfill||{}).frozen_core_funding||[]).join(', ')||'—')+row('Frozen enrichment',((lr.derivative_backfill||{}).frozen_enrichment||[]).join(', ')||'—');$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:lr.blocker?`<div class=\"notice y\"><b>目前學習狀態：</b>${esc(lr.blocker)}</div>`:'';if($('derivSources'))$('derivSources').textContent=JSON.stringify((lr.derivative_backfill||{}),null,2);"
     )
     return html
 
