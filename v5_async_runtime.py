@@ -10,18 +10,23 @@ import v6_runtime
 def _legacy_runtime_allowed(core) -> bool:
     """Return True only when an older runtime is intentionally active.
 
-    v7 reuses this module for historical Signal learning orchestration, but legacy
-    v5/v6 boot notices and the v6 execution optimizer must not run inside v7.
+    Modern v7+ runtimes reuse this module for historical Signal-learning
+    orchestration, but legacy v5/v6 boot notices and the v6 execution optimizer
+    must never run inside v7, v8, or later versions.
     """
     runtime = str(core.state.get('runtime_version') or '')
-    return not runtime.startswith('7.')
+    try:
+        major = int(runtime.split('.', 1)[0])
+    except Exception:
+        major = 0
+    return major < 7
 
 
 async def learning_tick_v5_async(core) -> None:
     """Run replay and signal-model fitting off the live loop.
 
-    Under v7 this function is only the historical Signal-learning stage. The v7
-    learning guard owns execution-policy optimization separately.
+    Under modern v7+ runtimes this function is only the historical Signal-learning
+    stage. The modern learning guard owns execution-policy optimization separately.
     """
     live_added = await asyncio.to_thread(core.ingest_completed_live_samples)
     con = core.db()
@@ -57,8 +62,8 @@ async def learning_tick_v5_async(core) -> None:
             await v5_runtime._notify_promotions(core, training)
 
         # v6 execution optimization exists only for an intentionally active legacy
-        # runtime. v7 has its own independent point-in-time execution audit and must
-        # never run this older optimizer in the background.
+        # runtime. Modern runtimes have their own independent point-in-time execution
+        # audit and must never run this older optimizer in the background.
         if legacy_runtime:
             last_exec = int(core.get_state('v6_last_exec_opt_ts', 0) or 0)
             if training or time.time() - last_exec >= 6 * 3600:
@@ -99,10 +104,10 @@ async def learning_tick_v5_async(core) -> None:
         'model_schema_version': 2,
         'execution_schema_version': 1,
         'training_off_event_loop': True,
-        'legacy_execution_disabled_under_v7': not legacy_runtime,
+        'legacy_execution_disabled_under_v7_plus': not legacy_runtime,
     }
 
-    # A v7 process must emit only its own startup notice. Older boot notices stay
+    # A modern process must emit only its own startup notice. Older boot notices stay
     # available solely when those older runtimes are intentionally launched.
     if legacy_runtime:
         await v5_runtime.maybe_boot_notice(core)
