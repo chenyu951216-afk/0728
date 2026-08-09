@@ -7,6 +7,17 @@ import v5_runtime
 import v6_runtime
 
 
+def _legacy_boot_notices_allowed(core) -> bool:
+    """Only legacy runtimes may announce v5/v6 startup messages.
+
+    v7 still reuses this module's learning orchestration for historical replay and
+    compatibility, but that must never make the background learner claim that an
+    older runtime has started. Daily reports and learning continue normally.
+    """
+    runtime = str(core.state.get('runtime_version') or '')
+    return not runtime.startswith('7.')
+
+
 async def learning_tick_v5_async(core) -> None:
     """Run replay, signal-model fitting and execution-policy fitting off the live loop."""
     live_added = await asyncio.to_thread(core.ingest_completed_live_samples)
@@ -85,18 +96,19 @@ async def learning_tick_v5_async(core) -> None:
         'training_off_event_loop': True,
     }
 
-    # Keep the old v5 notice for backwards diagnostics, then explicitly verify that
-    # the new double-certification runtime can deliver to Discord too.
-    await v5_runtime.maybe_boot_notice(core)
-    if core.get_state('discord_boot_version_v6') != v6_runtime.V6_VERSION:
-        ok = await v5_runtime.robust_send_discord(
-            core,
-            '✅ ETH Adaptive AI v6 已啟動',
-            'Signal Champion + Execution Champion 雙層 OOS 驗證已啟用。新的 Entry / SL / TP / 分批 / BE / trailing 必須和歷史未見資料驗證完全一致；未通過 execution OOS 的方向模型不會建立正式交易計畫。',
-            0x3498DB,
-        )
-        if ok:
-            core.set_state('discord_boot_version_v6', v6_runtime.V6_VERSION)
+    # v7 reuses this learning worker, but it must never emit legacy startup claims.
+    # Older runtimes retain their diagnostics when they are intentionally active.
+    if _legacy_boot_notices_allowed(core):
+        await v5_runtime.maybe_boot_notice(core)
+        if core.get_state('discord_boot_version_v6') != v6_runtime.V6_VERSION:
+            ok = await v5_runtime.robust_send_discord(
+                core,
+                '✅ ETH Adaptive AI v6 已啟動',
+                'Signal Champion + Execution Champion 雙層 OOS 驗證已啟用。新的 Entry / SL / TP / 分批 / BE / trailing 必須和歷史未見資料驗證完全一致；未通過 execution OOS 的方向模型不會建立正式交易計畫。',
+                0x3498DB,
+            )
+            if ok:
+                core.set_state('discord_boot_version_v6', v6_runtime.V6_VERSION)
     await v5_runtime.maybe_daily_report(core)
 
 
