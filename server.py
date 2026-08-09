@@ -20,6 +20,7 @@ from v7_trade_monitor import install as install_trade_monitor
 from v7_timeout_guard import install as install_timeout_guard
 from v7_trade_feed import install as install_trade_feed
 from v7_monitor_gate import install as install_monitor_gate
+from v8_migration import install as install_evolution_migration
 from v8_evolution import install as install_evolution
 from v8_execution_oof import install as install_execution_oof
 from v8_notice import install as install_evolution_notice
@@ -59,14 +60,17 @@ install_trade_monitor(core)
 install_timeout_guard()
 install_trade_feed(core)
 install_monitor_gate(core)
-# Evolution is installed last so it inherits every v7 safety gate. It may search
-# broader strategy/model/execution candidates, but it cannot bypass point-in-time
-# labels, untouched execution audit, live drift quarantine, re-entry or risk-feed gates.
+# Retire only deployable artifacts from the pre-evolution architecture. Historical
+# point-in-time samples stay intact and immediately seed the new Genome challengers.
+install_evolution_migration(core)
+# Evolution inherits every v7 safety gate. It may search broader model/execution
+# candidates, but cannot bypass point-in-time labels, untouched audit, live drift,
+# re-entry or ordered-trade monitoring.
 install_evolution(core)
-# The execution audit must replay the same evolving Signal architecture. Each OOF
-# fold selects its genome only from that fold's historical train/calibration data.
+# Execution audit replays the same evolving Signal architecture. Each OOF fold
+# selects its genome only from that fold's past train/calibration data.
 install_execution_oof()
-# Discord messages expose the exact model/execution versions and evolution evidence.
+# Discord exposes exact model/execution versions and evolution evidence.
 install_evolution_notice(core)
 
 app = core.app
