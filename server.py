@@ -26,24 +26,34 @@ from v8_execution_oof import install as install_execution_oof
 from v8_execution_walkforward import install as install_execution_walkforward
 from v8_notice import install as install_evolution_notice
 from v8_storage_guard import install as install_storage_guard, install_early as install_storage_guard_early
+from v8_stability import install as install_stability
 
-# Do this before any model/sample migration. Production must never silently fall
-# back from the mounted SQLite path to a fresh /tmp database.
+# Before any migration, production must never silently switch from the mounted
+# database to /tmp.
 install_storage_guard_early(core)
 install_v5(core)
 install_async(core)
 
+# Legacy v5 metadata can occasionally be absent even though the newer point-in-time
+# schema and its samples are already valid. Never destructively clear newer samples
+# just because the legacy bookkeeping key is missing.
 if core.get_state('v5_sample_schema') != 2:
+    pit_schema = int(core.get_state('point_in_time_sample_schema', 0) or 0)
     con = core.db()
-    con.execute('DROP TABLE IF EXISTS learning_samples_v4_archive')
-    con.execute('CREATE TABLE learning_samples_v4_archive AS SELECT * FROM learning_samples')
-    con.execute('DELETE FROM learning_samples')
-    con.execute("UPDATE model_registry SET status='ARCHIVED' WHERE status='CHAMPION'")
-    con.commit(); con.close()
-    core.set_state('last_learning_sample_ts_v2', core.START_TS)
-    core.set_state('v5_last_train_sample_total', 0)
-    core.set_state('last_train_ts_v5', 0)
-    core.set_state('v5_sample_schema', 2)
+    sample_count = int(con.execute('SELECT COUNT(*) FROM learning_samples').fetchone()[0])
+    if pit_schema >= 4 and sample_count > 0:
+        con.close()
+        core.set_state('v5_sample_schema', 2)
+    else:
+        con.execute('DROP TABLE IF EXISTS learning_samples_v4_archive')
+        con.execute('CREATE TABLE learning_samples_v4_archive AS SELECT * FROM learning_samples')
+        con.execute('DELETE FROM learning_samples')
+        con.execute("UPDATE model_registry SET status='ARCHIVED' WHERE status='CHAMPION'")
+        con.commit(); con.close()
+        core.set_state('last_learning_sample_ts_v2', core.START_TS)
+        core.set_state('v5_last_train_sample_total', 0)
+        core.set_state('last_train_ts_v5', 0)
+        core.set_state('v5_sample_schema', 2)
 
 con = core.db()
 con.execute("UPDATE model_registry SET status='ARCHIVED' WHERE status='CHAMPION' AND direction NOT IN ('LONG','SHORT')")
@@ -68,9 +78,11 @@ install_evolution(core)
 install_execution_oof()
 install_execution_walkforward(core)
 install_evolution_notice(core)
-# Final wrapper blocks learning and new paper signals when storage identity/health is
-# suspicious. Existing OPEN lifecycle monitoring remains independent.
+# Storage guard wraps the final learning/signal implementations.
 install_storage_guard(core)
+# Stability must be last: it isolates scan/risk/learning/execution/Discord failures
+# and supervises the already-installed 7.2 runtime without bypassing safety gates.
+install_stability(core)
 
 app = core.app
 PORT = core.PORT
