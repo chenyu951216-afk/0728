@@ -9,6 +9,7 @@ from typing import Any
 
 import adaptive_v5
 import v5_runtime
+import v7_runtime
 import v8_stability
 import v7_trade_monitor as trade_monitor
 
@@ -122,6 +123,10 @@ def _install_independent_live_loops(core: Any) -> None:
             await asyncio.sleep(max(1.0, float(trade_monitor.TRADE_MONITOR_SECONDS)))
 
     async def independent_live_worker() -> None:
+        try:
+            await v7_runtime.maybe_boot_notice(core)
+        except Exception as exc:
+            v8_stability._err(core, 'discord_send', exc, status='DEGRADED')
         tasks = [
             asyncio.create_task(scan_loop(), name='market-scan-loop'),
             asyncio.create_task(risk_loop(), name='ordered-risk-loop'),
@@ -156,6 +161,7 @@ def install(core: Any) -> None:
         'sample_commit_every': SAMPLE_COMMIT_EVERY,
         'discord_poll_isolated_from_market_and_risk_loops': True,
         'learning_health_reports_running': True,
+        'single_modern_boot_notice_preserved': True,
     }
     core.state['runtime_version'] = VERSION
     core.app.version = '8.1.1'
