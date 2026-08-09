@@ -1,11 +1,9 @@
-import json
 import sqlite3
 import tempfile
 import time
 import unittest
 
 import derivative_data
-import v5_runtime
 import v10_final_integrity as fin
 import v10_source_freeze as freeze
 
@@ -38,18 +36,29 @@ class FinalIntegrityTests(unittest.TestCase):
         with tempfile.NamedTemporaryFile(suffix='.db') as f:
             c=Core(f.name); now=int(time.time())
             state=fin._default_state(c); state['core_frozen']=True; state['frozen_core_oi']=['bybit_oi']; state['frozen_core_funding']=['funding_binance']; state['frozen_enrichment']=[]
-            state['sources']={'bybit_oi':{'last_success_at':now,'processed_through':now},'funding_binance':{'last_success_at':now,'processed_through':now-60},'cg_book':{'processed_through':c.START_TS}}
+            state['sources']={'bybit_oi':{'last_success_at':now,'processed_through':now,'detail':{'oi_rows':100}},'funding_binance':{'last_success_at':now,'processed_through':now-60,'detail':{'funding_rows':100}},'cg_book':{'processed_through':c.START_TS}}
             fin._save(c,state)
             self.assertGreater(freeze.core_ready_through(c),c.START_TS)
             self.assertEqual(freeze.core_ready_through(c),now-60)
 
-    def test_freeze_requires_complete_oi_and_funding(self):
+    def test_freeze_requires_complete_oi_and_funding_with_real_rows(self):
         with tempfile.NamedTemporaryFile(suffix='.db') as f:
             c=Core(f.name); now=int(time.time())
-            state=fin._default_state(c); state['sources']={'bybit_oi':{'last_success_at':now,'processed_through':now},'funding_binance':{'last_success_at':now,'processed_through':c.START_TS}}
+            state=fin._default_state(c); state['sources']={'bybit_oi':{'last_success_at':now,'processed_through':now,'detail':{'oi_rows':200}},'funding_binance':{'last_success_at':now,'processed_through':c.START_TS,'detail':{'funding_rows':200}}}
             fin._save(c,state); freeze._freeze_if_ready(c); self.assertFalse(fin._load(c).get('core_frozen',False))
             state=fin._load(c); state['sources']['funding_binance']['processed_through']=now; fin._save(c,state); freeze._freeze_if_ready(c)
             frozen=fin._load(c); self.assertTrue(frozen.get('core_frozen')); self.assertIn('bybit_oi',frozen['frozen_core_oi']); self.assertIn('funding_binance',frozen['frozen_core_funding'])
+
+    def test_zero_row_completed_source_cannot_certify_core_while_real_source_is_pending(self):
+        with tempfile.NamedTemporaryFile(suffix='.db') as f:
+            c=Core(f.name); now=int(time.time())
+            state=fin._default_state(c); state['sources']={
+                'cg_oi':{'last_success_at':now,'processed_through':now,'detail':{'rows':0}},
+                'bybit_oi':{'last_success_at':now,'processed_through':c.START_TS,'detail':{'oi_rows':5}},
+                'funding_binance':{'last_success_at':now,'processed_through':now,'detail':{'funding_rows':100}},
+            }
+            fin._save(c,state); freeze._freeze_if_ready(c)
+            self.assertFalse(fin._load(c).get('core_frozen',False))
 
     def test_source_choice_does_not_rank_by_future_row_count(self):
         with tempfile.NamedTemporaryFile(suffix='.db') as f:
