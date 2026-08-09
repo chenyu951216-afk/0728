@@ -20,6 +20,7 @@ from v7_trade_monitor import install as install_trade_monitor
 from v7_timeout_guard import install as install_timeout_guard
 from v7_trade_feed import install as install_trade_feed
 from v7_monitor_gate import install as install_monitor_gate
+from v8_evolution import install as install_evolution
 
 install_v5(core)
 install_async(core)
@@ -56,6 +57,10 @@ install_trade_monitor(core)
 install_timeout_guard()
 install_trade_feed(core)
 install_monitor_gate(core)
+# Evolution is installed last so it inherits every v7 safety gate. It may search
+# broader strategy/model/execution candidates, but it cannot bypass point-in-time
+# labels, untouched execution audit, live drift quarantine, re-entry or risk-feed gates.
+install_evolution(core)
 
 app = core.app
 PORT = core.PORT
