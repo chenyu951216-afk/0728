@@ -102,12 +102,11 @@ install_overfit_guard(core)
 install_final_notice(core)
 install_sqlite_stability(core)
 install_clean_baseline(core)
-# Installed last: an unresolved historical price gap must never be skipped by the
-# replay cursor, and previously derived replay state is rebuilt once without touching
-# the clean raw Dataset ID / market / derivative caches.
+# Installed last: unresolved historical price gaps cannot be skipped, and the 8.2.2
+# first-real-sample feature-builder contract is enforced before any labels are written.
 install_replay_cursor_integrity(core)
 
-RUNTIME_VERSION = '8.2.1-20260809'
+RUNTIME_VERSION = '8.2.2-20260810'
 core.state['runtime_version'] = RUNTIME_VERSION
 core.state.setdefault('strict_replay', {})['runtime'] = RUNTIME_VERSION
 core.state['strict_replay']['learning_scheduler'] = {
@@ -118,8 +117,9 @@ core.state['strict_replay']['learning_scheduler'] = {
     'core_sources_frozen_before_replay': True,
     'optional_source_cannot_deadlock': True,
     'unresolved_price_gap_cannot_advance_replay_cursor': True,
+    'feature_builder_contract_verified': True,
 }
-core.app.version = '8.2.1'
+core.app.version = '8.2.2'
 
 app = core.app
 PORT = core.PORT
@@ -131,7 +131,7 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 def dashboard() -> str:
     html = Path('dashboard_v721.html').read_text(encoding='utf-8')
     html = (
-        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.2.1 Final Clean Baseline')
+        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.2.2 Final Clean Baseline')
         .replace(
             'Walk-Forward Evolution · Storage Identity Guard · Subsystem-Isolated Fail-Closed',
             'Clean Dataset · Strict Replay Cursor Integrity · 5m Event Labels · Anti-Overfit OOS · SQLite Guard',
