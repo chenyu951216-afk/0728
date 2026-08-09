@@ -40,6 +40,7 @@ from v10_overfit_guard import install as install_overfit_guard
 from v10_notice import install as install_final_notice
 from v11_sqlite_stability import install as install_sqlite_stability
 from v12_clean_baseline import install as install_clean_baseline
+from v13_replay_cursor_integrity import install as install_replay_cursor_integrity
 
 install_storage_guard_early(core)
 install_v5(core)
@@ -88,9 +89,6 @@ install_execution_walkforward(core)
 install_evolution_notice(core)
 install_storage_guard(core)
 install_stability(core)
-# Final layers are installed last. Older modules cannot overwrite event-time replay,
-# source-consistent derivatives, anti-overfit certification, SQLite stability, or the
-# final clean-dataset provenance gate.
 install_strict_final(core)
 install_replay_readiness(core)
 install_training_store(core)
@@ -104,8 +102,12 @@ install_overfit_guard(core)
 install_final_notice(core)
 install_sqlite_stability(core)
 install_clean_baseline(core)
+# Installed last: an unresolved historical price gap must never be skipped by the
+# replay cursor, and previously derived replay state is rebuilt once without touching
+# the clean raw Dataset ID / market / derivative caches.
+install_replay_cursor_integrity(core)
 
-RUNTIME_VERSION = '8.2.0-20260809'
+RUNTIME_VERSION = '8.2.1-20260809'
 core.state['runtime_version'] = RUNTIME_VERSION
 core.state.setdefault('strict_replay', {})['runtime'] = RUNTIME_VERSION
 core.state['strict_replay']['learning_scheduler'] = {
@@ -115,8 +117,9 @@ core.state['strict_replay']['learning_scheduler'] = {
     'readiness_diagnostics_preserved': True,
     'core_sources_frozen_before_replay': True,
     'optional_source_cannot_deadlock': True,
+    'unresolved_price_gap_cannot_advance_replay_cursor': True,
 }
-core.app.version = '8.2.0'
+core.app.version = '8.2.1'
 
 app = core.app
 PORT = core.PORT
@@ -128,14 +131,14 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 def dashboard() -> str:
     html = Path('dashboard_v721.html').read_text(encoding='utf-8')
     html = (
-        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.2.0 Final Clean Baseline')
+        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.2.1 Final Clean Baseline')
         .replace(
             'Walk-Forward Evolution · Storage Identity Guard · Subsystem-Isolated Fail-Closed',
-            'Clean Dataset Provenance · Strict Replay · 5m Event Labels · Anti-Overfit OOS · SQLite Guard',
+            'Clean Dataset · Strict Replay Cursor Integrity · 5m Event Labels · Anti-Overfit OOS · SQLite Guard',
         )
     )
-    # Mobile layout: long runtime states must wrap inside their own card instead of
-    # stretching the two-column grid and making the page look broken on iPhone widths.
+    html = html.replace('2020→現在 K 線覆蓋（直接查 DB）', '原始價格資料覆蓋（必要時框）')
+    html = html.replace('無 HTF look-ahead 樣本重播', 'Strict Replay 時間游標進度')
     html = html.replace(
         '.s{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.45}',
         '.s{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.45;overflow-wrap:anywhere;word-break:break-word}',
@@ -174,10 +177,8 @@ def dashboard() -> str:
     )
     html = html.replace(
         "row('最新市場',tm(rp.latest_market_ts));$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:'';",
-        "row('最新市場',tm(rp.latest_market_ts))+row('Learning phase',lr.phase||lr.runtime_status||'—')+row('本輪新增樣本',lr.v5_samples_added??0)+row('價格補資料目標',lr.price_backfill_target?(lr.price_backfill_target.asset+' '+lr.price_backfill_target.tf):'無')+row('Derivative ready through',tm(lr.derivative_ready_through))+row('Core source freeze',(lr.derivative_backfill||{}).core_frozen?'已鎖定':'等待核心來源完成')+row('Frozen OI',((lr.derivative_backfill||{}).frozen_core_oi||[]).join(', ')||'—')+row('Frozen funding',((lr.derivative_backfill||{}).frozen_core_funding||[]).join(', ')||'—')+row('Frozen enrichment',((lr.derivative_backfill||{}).frozen_enrichment||[]).join(', ')||'—');$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:lr.blocker?`<div class=\"notice y\"><b>目前學習狀態：</b>${esc(lr.blocker)}</div>`:'';if($('derivSources'))$('derivSources').textContent=JSON.stringify((lr.derivative_backfill||{}),null,2);",
+        "row('最新市場',tm(rp.latest_market_ts))+row('Learning phase',lr.phase||lr.runtime_status||'—')+row('本輪新增樣本',lr.v5_samples_added??0)+row('價格補資料目標',lr.price_backfill_target?(lr.price_backfill_target.asset+' '+lr.price_backfill_target.tf):'無')+row('Derivative ready through',tm(lr.derivative_ready_through))+row('Core source freeze',(lr.derivative_backfill||{}).core_frozen?'已鎖定':'等待核心來源完成')+row('Frozen OI',((lr.derivative_backfill||{}).frozen_core_oi||[]).join(', ')||'—')+row('Frozen funding',((lr.derivative_backfill||{}).frozen_core_funding||[]).join(', ')||'—')+row('Frozen enrichment',((lr.derivative_backfill||{}).frozen_enrichment||[]).join(', ')||'—');let pb=lr.replay_price_blocker||{};$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:pb.blocked?`<div class=\"notice y\"><b>Strict Replay 正在等待價格資料：</b>${esc(pb.reason||'price gap')}<br>時間：${tm(pb.at_ts)}</div>`:lr.blocker?`<div class=\"notice y\"><b>目前學習狀態：</b>${esc(lr.blocker)}</div>`:'';if($('derivSources'))$('derivSources').textContent=JSON.stringify((lr.derivative_backfill||{}),null,2);",
     )
-    # Dataset provenance is deliberately fetched separately so the old dashboard API
-    # contract does not need another migration.
     html = html.replace(
         "async function setEq(){",
         "async function refreshBaseline(){try{let b=await fetch('/api/v12/baseline').then(r=>r.json()),el=$('baselineNotice');if(!el)return;el.className='notice '+(b.clean?'g':'r');el.innerHTML=b.clean?`<b>Final Clean Baseline：CLEAN</b><br>Dataset ID：${esc(b.dataset_id||'—')}<br>此資料集可進行正式 Champion 認證。`:`<b>Final Clean Baseline：LEGACY_CARRYOVER</b><br>${esc(b.reason||'舊 raw cache 存在')}<br><b>目前正式 Champion 認證與新單已 fail-closed。</b>`}catch(e){let el=$('baselineNotice');if(el){el.className='notice r';el.textContent='Dataset provenance 讀取失敗：'+String(e)}}}\nasync function setEq(){",
