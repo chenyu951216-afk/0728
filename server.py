@@ -25,8 +25,11 @@ from v8_evolution import install as install_evolution
 from v8_execution_oof import install as install_execution_oof
 from v8_execution_walkforward import install as install_execution_walkforward
 from v8_notice import install as install_evolution_notice
-from v8_storage_guard import install as install_storage_guard
+from v8_storage_guard import install as install_storage_guard, install_early as install_storage_guard_early
 
+# Do this before any model/sample migration. Production must never silently fall
+# back from the mounted SQLite path to a fresh /tmp database.
+install_storage_guard_early(core)
 install_v5(core)
 install_async(core)
 
@@ -65,8 +68,8 @@ install_evolution(core)
 install_execution_oof()
 install_execution_walkforward(core)
 install_evolution_notice(core)
-# Must be last: wraps the final learning/signal functions and blocks them when the
-# production SQLite path is not backed by a real persistent /data mount.
+# Final wrapper blocks learning and new paper signals when storage identity/health is
+# suspicious. Existing OPEN lifecycle monitoring remains independent.
 install_storage_guard(core)
 
 app = core.app
