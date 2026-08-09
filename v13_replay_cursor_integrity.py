@@ -10,8 +10,8 @@ import v7_timesafe_learning
 import v9_final
 import v10_final_integrity as final
 
-VERSION = '8.2.1-20260809'
-INTEGRITY_SCHEMA = 1
+VERSION = '8.2.2-20260810'
+INTEGRITY_SCHEMA = 2
 STATE_KEY = 'replay_cursor_integrity_schema'
 
 
@@ -49,6 +49,21 @@ def _decision_state(*, htf_ready: bool, future_ready: bool, continuity_ready: bo
     if not continuity_ready:
         return 'BLOCK_PRICE_GAP'
     return 'READY'
+
+
+def _build_model_features(core: Any, m15s: list[dict[str, Any]], h1s: list[dict[str, Any]],
+                          btcs: list[dict[str, Any]], regime: dict[str, Any],
+                          extras: dict[str, Any]) -> dict[str, float]:
+    """Build replay features through the callable builder, never through its result.
+
+    v7_timesafe_learning.model_safe_features expects a callable as its first argument.
+    8.2.1 accidentally passed core.build_features(...) (a dict) into that slot, so the
+    first real post-warmup sample failed with: 'dict' object is not callable.
+    """
+    builder = getattr(core, 'build_features', None)
+    if not callable(builder):
+        raise TypeError(f'core.build_features must be callable, got {type(builder).__name__}')
+    return v7_timesafe_learning.model_safe_features(builder, m15s, h1s, btcs, regime, extras)
 
 
 def strict_generate_samples(core: Any, batch: int = 500) -> int:
@@ -112,9 +127,6 @@ def strict_generate_samples(core: Any, batch: int = 500) -> int:
 
         state = _decision_state(htf_ready=htf_ready, future_ready=future_ready, continuity_ready=continuity_ready)
         if state == 'WARMUP':
-            # Warm-up is an explicit non-tradable historical interval. It may advance
-            # the time cursor because there is nothing the final strategy could have
-            # legally evaluated before the required higher-timeframe lookback exists.
             newest_committed = sample_open
             warmup_skipped += 1
             if examined >= batch:
@@ -133,7 +145,7 @@ def strict_generate_samples(core: Any, batch: int = 500) -> int:
 
         regime = v5_runtime.detect_regime(d1s, h4s, h1s)
         extras = final.strict_derivative_extras(core, core.derivative_history, decision_close)
-        features = v7_timesafe_learning.model_safe_features(core.build_features(m15s, h1s, btcs, regime, extras))
+        features = _build_model_features(core, m15s, h1s, btcs, regime, extras)
         quality = max(58.0, 78.0 * (.84 + .16 * float(extras.get('derivative_coverage', 0.0))))
         for strategy in final.signal.STRATEGIES:
             for direction in final.signal.DIRECTIONS:
@@ -164,6 +176,7 @@ def strict_generate_samples(core: Any, batch: int = 500) -> int:
         'created_strategy_direction_samples': created,
         'cursor_advanced_only_through_legal_decisions_or_explicit_warmup': True,
         'unresolved_price_gap_can_never_be_skipped': True,
+        'feature_builder_contract_verified': True,
         'future_usage': 'labels only; never features or parameter selection',
     }
     return created
@@ -172,13 +185,11 @@ def strict_generate_samples(core: Any, batch: int = 500) -> int:
 def install(core: Any) -> None:
     current = int(core.get_state(STATE_KEY, 0) or 0)
     if current < INTEGRITY_SCHEMA:
-        _reset_derived_replay(core, '8.2.1 replay cursor integrity: old replay could advance across unresolved price gaps')
+        _reset_derived_replay(core, '8.2.2 replay integrity: rebuild derived learning after first-real-sample feature-builder fix')
         core.set_state(STATE_KEY, INTEGRITY_SCHEMA)
 
     final.generate_samples = strict_generate_samples
 
-    # A formal training pass also requires that no required historical price series is
-    # still being repaired. This is an additional certification gate, not a shortcut.
     original_train = v5_runtime.train_v5
     def price_complete_train(c: Any, *args: Any, **kwargs: Any):
         chosen = None
@@ -203,6 +214,7 @@ def install(core: Any) -> None:
         'unresolved_price_gap_can_advance_cursor': False,
         'explicit_warmup_can_advance_cursor': True,
         'formal_training_requires_price_repair_complete': True,
+        'feature_builder_contract_verified': True,
     }
     core.state['runtime_version'] = VERSION
-    core.app.version = '8.2.1'
+    core.app.version = '8.2.2'
