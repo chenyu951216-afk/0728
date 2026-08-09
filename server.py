@@ -94,6 +94,19 @@ install_derivative_gate(core)
 install_multisource_derivatives(core)
 install_multisource_integrity(core)
 
+# v8.0.5 fixes learning-scheduler starvation: an incomplete/failed legacy price
+# backfill can no longer prevent independent derivative backfill + Strict Replay.
+RUNTIME_VERSION = '8.0.5-20260809'
+core.state['runtime_version'] = RUNTIME_VERSION
+core.state.setdefault('strict_replay', {})['runtime'] = RUNTIME_VERSION
+core.state['strict_replay']['learning_scheduler'] = {
+    'price_backfill_nonexclusive': True,
+    'price_backfill_failure_isolated': True,
+    'derivative_failure_uses_only_previous_safe_watermark': True,
+    'readiness_diagnostics_preserved': True,
+}
+core.app.version = '8.0.5'
+
 app = core.app
 PORT = core.PORT
 
@@ -103,13 +116,20 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 @app.get('/', response_class=HTMLResponse)
 def dashboard() -> str:
     html = Path('dashboard_v721.html').read_text(encoding='utf-8')
-    return (
-        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.0.4 Final Strict Replay')
+    html = (
+        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.0.5 Final Strict Replay')
         .replace(
             'Walk-Forward Evolution · Storage Identity Guard · Subsystem-Isolated Fail-Closed',
-            'Strict Event-Time Replay · Parallel Multi-Source Derivatives · Full-Span Learning · Untouched Audit · Fail-Closed',
+            'Strict Event-Time Replay · Non-Blocking Multi-Source Learning · Full-Span Evolution · Untouched Audit · Fail-Closed',
         )
     )
+    # Surface the exact scheduler/readiness blocker instead of showing Learning=OK
+    # while samples remain at zero with no explanation.
+    html = html.replace(
+        "row('最新市場',tm(rp.latest_market_ts));$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:'';",
+        "row('最新市場',tm(rp.latest_market_ts))+row('Learning phase',lr.phase||'—')+row('本輪新增樣本',lr.v5_samples_added??0)+row('價格補資料目標',lr.price_backfill_target?(lr.price_backfill_target.asset+' '+lr.price_backfill_target.tf):'無')+row('Derivative ready through',tm(lr.derivative_ready_through));$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:lr.blocker?`<div class=\"notice y\"><b>目前學習狀態：</b>${esc(lr.blocker)}</div>`:'';"
+    )
+    return html
 
 
 if __name__ == '__main__':
