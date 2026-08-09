@@ -1,5 +1,6 @@
 import sqlite3
 import tempfile
+import time
 import unittest
 
 import v5_runtime
@@ -41,6 +42,23 @@ class IntegrityTests(unittest.TestCase):
             self.assertEqual(con.execute('SELECT COUNT(*) FROM learning_feature_snapshots').fetchone()[0], 0)
             con.close()
             self.assertEqual(core.get_state(v5_runtime.REPLAY_STATE_KEY), core.START_TS)
+
+    def test_fully_recovered_source_can_join_a_new_generation(self):
+        with tempfile.NamedTemporaryFile(suffix='.db') as f:
+            core = Core(f.name)
+            state = ms._default_state()
+            state['sources']['cg_book'] = {
+                'disabled': True,
+                'cursor': int(time.time()),
+                'success_streak': integ.RECOVERY_SUCCESS_STREAK,
+                'disabled_reason': 'old provider rejection',
+            }
+            core.set_state(ms.STATE_KEY, state)
+            rec = state['sources']['cg_book']
+            self.assertTrue(integ._reactivate_if_fully_recovered(core, 'cg_book', rec))
+            new_state = core.get_state(ms.STATE_KEY)
+            self.assertFalse(new_state['sources']['cg_book']['disabled'])
+            self.assertEqual(new_state['sources']['cg_book']['mode'], 'recovered_for_new_replay_generation')
 
 
 if __name__ == '__main__':
