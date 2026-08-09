@@ -23,6 +23,7 @@ from v7_monitor_gate import install as install_monitor_gate
 from v8_migration import install as install_evolution_migration
 from v8_evolution import install as install_evolution
 from v8_execution_oof import install as install_execution_oof
+from v8_execution_walkforward import install as install_execution_walkforward
 from v8_notice import install as install_evolution_notice
 
 install_v5(core)
@@ -70,6 +71,9 @@ install_evolution(core)
 # Execution audit replays the same evolving Signal architecture. Each OOF fold
 # selects its genome only from that fold's past train/calibration data.
 install_execution_oof()
+# Replace the wasteful single final split with expanding chronological execution
+# walk-forward. Each fold tunes only on its past and is judged on the next unseen block.
+install_execution_walkforward(core)
 # Discord exposes exact model/execution versions and evolution evidence.
 install_evolution_notice(core)
 
