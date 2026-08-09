@@ -36,6 +36,7 @@ from v9_multisource_derivatives import install as install_multisource_derivative
 from v9_multisource_integrity import install as install_multisource_integrity
 from v10_final_integrity import install as install_final_integrity
 from v10_source_freeze import install as install_source_freeze
+from v10_notice import install as install_final_notice
 
 install_storage_guard_early(core)
 install_v5(core)
@@ -86,7 +87,7 @@ install_storage_guard(core)
 install_stability(core)
 # Final layers are installed last. Older modules cannot overwrite event-time replay,
 # non-starving scheduling, source-consistent derivatives, full-span storage, live
-# parity, or untouched execution audit rules.
+# parity, untouched execution audit, or the single modern Discord boot notice.
 install_strict_final(core)
 install_replay_readiness(core)
 install_training_store(core)
@@ -96,6 +97,7 @@ install_multisource_derivatives(core)
 install_multisource_integrity(core)
 install_final_integrity(core)
 install_source_freeze(core)
+install_final_notice(core)
 
 RUNTIME_VERSION = '8.1.0-20260809'
 core.state['runtime_version'] = RUNTIME_VERSION
