@@ -22,6 +22,7 @@ from v7_trade_feed import install as install_trade_feed
 from v7_monitor_gate import install as install_monitor_gate
 from v8_evolution import install as install_evolution
 from v8_execution_oof import install as install_execution_oof
+from v8_notice import install as install_evolution_notice
 
 install_v5(core)
 install_async(core)
@@ -65,6 +66,8 @@ install_evolution(core)
 # The execution audit must replay the same evolving Signal architecture. Each OOF
 # fold selects its genome only from that fold's historical train/calibration data.
 install_execution_oof()
+# Discord messages expose the exact model/execution versions and evolution evidence.
+install_evolution_notice(core)
 
 app = core.app
 PORT = core.PORT
