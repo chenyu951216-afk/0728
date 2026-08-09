@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-import os
 import sqlite3
 import tempfile
 import unittest
@@ -58,10 +56,15 @@ class StorageGuardTests(unittest.TestCase):
     def test_larger_alternative_database_is_reported(self):
         with tempfile.TemporaryDirectory() as d:
             current = Path(d) / 'eth_adaptive.db'
-            current.write_bytes(b'x' * 1024)
-            other = Path(d) / 'old.db'
-            other.write_bytes(b'x' * 6_000_000)
             core = FakeStateCore(str(current))
+            con = core.db(); con.close()
+
+            other = Path(d) / 'old.db'
+            alt = sqlite3.connect(other)
+            alt.execute('CREATE TABLE payload(x BLOB)')
+            alt.execute('INSERT INTO payload VALUES(zeroblob(6000000))')
+            alt.commit(); alt.close()
+
             status = v8_storage_guard.storage_status(core, update_identity=False)
             self.assertTrue(status['possible_db_mismatch'])
             self.assertIn('old.db', status['reason'])
