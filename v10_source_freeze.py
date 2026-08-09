@@ -49,9 +49,6 @@ def _freeze_if_ready(core: Any) -> None:
     state=fin._load(core)
     if state.get('core_frozen'):
         return
-    # A cursor that reached today but produced zero rows is not a usable core source.
-    # This prevents a provider that silently returned empty pages from opening replay
-    # before Gate/Bybit/Binance have actually delivered historical evidence.
     oi=[k for k in OI_KEYS if _usable_complete(core,k)]
     funding=[k for k in FUNDING_KEYS if _usable_complete(core,k)]
     oi_settled=bool(oi) or _all_settled_without_usable(core,OI_KEYS)
@@ -104,8 +101,6 @@ def core_ready_through(core: Any) -> int|None:
     if not keys:
         return None
     vals=[int(fin._src(core,k).get('processed_through') or core.START_TS) for k in keys]
-    # All frozen sources are part of the feature definition, so the slowest frozen
-    # source is the safe watermark. New/unfrozen providers never influence this generation.
     return min(vals) if vals else None
 
 
@@ -148,9 +143,10 @@ def strict_extras(core: Any,history: Any,decision_ts: int)->dict[str,float]:
 
 
 def install(core: Any)->None:
-    # v10_source_freeze is the sole owner of replay-generation/source-set changes.
-    # The earlier helper inside v10_final_integrity must not independently reset a
-    # generation after samples start, otherwise two managers can race each other.
+    # Query Gate from the configured replay start. Provider-empty early windows are
+    # explicit missingness; a hard-coded assumed launch date must not silently discard
+    # potentially available history.
+    fin.GATE_STATS_PUBLIC_START=int(core.START_TS)
     fin._maybe_freeze_enrichment=lambda c: None
     original_backfill=core.derivative_history.backfill_tick
     async def backfill(hub:Any,start_ts:int,pages:int=4):
@@ -170,4 +166,4 @@ def install(core: Any)->None:
     v9_final._strict_derivative_extras=lambda h,ts: strict_extras(core,h,ts)
     strict=core.state.setdefault('strict_replay',{}); strict['source_freeze']={'enabled':True,'core_sources_frozen_before_replay':True,
         'mid_generation_provider_join_forbidden':True,'late_provider_upgrade_rebuilds_labels_not_raw_data':True,'single_generation_manager':True,
-        'zero_row_cursor_cannot_certify_core_source':True}
+        'zero_row_cursor_cannot_certify_core_source':True,'gate_queries_start_at_learning_start_ts':True}
