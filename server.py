@@ -42,6 +42,7 @@ from v11_sqlite_stability import install as install_sqlite_stability
 from v12_clean_baseline import install as install_clean_baseline
 from v13_replay_cursor_integrity import install as install_replay_cursor_integrity
 from v14_operational_throughput import install as install_operational_throughput
+from v15_data_resilience import install as install_data_resilience
 
 install_storage_guard_early(core)
 install_v5(core)
@@ -103,12 +104,13 @@ install_overfit_guard(core)
 install_final_notice(core)
 install_sqlite_stability(core)
 install_clean_baseline(core)
-# Cursor integrity stays authoritative for legal historical decisions. 8.2.3 then
-# changes only I/O/compute scheduling: no sample-density, label, OOS or audit semantics.
 install_replay_cursor_integrity(core)
 install_operational_throughput(core)
+# Final authority: provider capability ranges, canonical multi-exchange price fallback,
+# targeted gap repair/quarantine, and model-feature source consistency.
+install_data_resilience(core)
 
-RUNTIME_VERSION = '8.2.3-20260810'
+RUNTIME_VERSION = '8.3.0-20260810'
 core.state['runtime_version'] = RUNTIME_VERSION
 core.state.setdefault('strict_replay', {})['runtime'] = RUNTIME_VERSION
 core.state['strict_replay']['learning_scheduler'] = {
@@ -118,12 +120,16 @@ core.state['strict_replay']['learning_scheduler'] = {
     'readiness_diagnostics_preserved': True,
     'core_sources_frozen_before_replay': True,
     'optional_source_cannot_deadlock': True,
+    'provider_retention_limit_cannot_deadlock': True,
+    'internal_price_gap_targeted_repair': True,
     'unresolved_price_gap_cannot_advance_replay_cursor': True,
+    'confirmed_unrecoverable_gap_can_be_audited_and_omitted_without_fabrication': True,
+    'fixed_price_fallback_priority': ['gate', 'bybit', 'binance', 'okx'],
     'feature_builder_contract_verified': True,
     'throughput_io_optimized': True,
     'performance_patch_resets_clean_dataset': False,
 }
-core.app.version = '8.2.3'
+core.app.version = '8.3.0'
 
 app = core.app
 PORT = core.PORT
@@ -135,10 +141,10 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 def dashboard() -> str:
     html = Path('dashboard_v721.html').read_text(encoding='utf-8')
     html = (
-        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.2.3 Final Clean Baseline')
+        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.3.0 Final Data Resilience')
         .replace(
             'Walk-Forward Evolution · Storage Identity Guard · Subsystem-Isolated Fail-Closed',
-            'Clean Dataset · Strict Replay Cursor Integrity · 5m Event Labels · Anti-Overfit OOS · SQLite Fairness',
+            'Clean Dataset · No-Lookahead Strict Replay · Multi-Exchange Gap Recovery · Provider Capability Guard · Anti-Overfit OOS',
         )
     )
     html = html.replace('2020→現在 K 線覆蓋（直接查 DB）', '原始價格資料覆蓋（必要時框）')
@@ -177,11 +183,11 @@ def dashboard() -> str:
     )
     html = html.replace(
         '<div id="learnMeta" style="margin-top:12px"></div><div id="learnError"></div></section>',
-        '<div id="learnMeta" style="margin-top:12px"></div><div id="learnError"></div><details><summary>查看衍生品來源 / readiness</summary><pre id="derivSources">—</pre></details></section>',
+        '<div id="learnMeta" style="margin-top:12px"></div><div id="learnError"></div><details><summary>查看資料來源 / gap readiness</summary><pre id="derivSources">—</pre></details></section>',
     )
     html = html.replace(
         "row('最新市場',tm(rp.latest_market_ts));$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:'';",
-        "row('最新市場',tm(rp.latest_market_ts))+row('Learning phase',lr.phase||lr.runtime_status||'—')+row('本輪新增樣本',lr.v5_samples_added??0)+row('價格補資料目標',lr.price_backfill_target?(lr.price_backfill_target.asset+' '+lr.price_backfill_target.tf):'無')+row('Derivative ready through',tm(lr.derivative_ready_through))+row('Core source freeze',(lr.derivative_backfill||{}).core_frozen?'已鎖定':'等待核心來源完成')+row('Frozen OI',((lr.derivative_backfill||{}).frozen_core_oi||[]).join(', ')||'—')+row('Frozen funding',((lr.derivative_backfill||{}).frozen_core_funding||[]).join(', ')||'—')+row('Frozen enrichment',((lr.derivative_backfill||{}).frozen_enrichment||[]).join(', ')||'—');let pb=lr.replay_price_blocker||{};$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:pb.blocked?`<div class=\"notice y\"><b>Strict Replay 正在等待價格資料：</b>${esc(pb.reason||'price gap')}<br>時間：${tm(pb.at_ts)}</div>`:lr.blocker?`<div class=\"notice y\"><b>目前學習狀態：</b>${esc(lr.blocker)}</div>`:'';if($('derivSources'))$('derivSources').textContent=JSON.stringify((lr.derivative_backfill||{}),null,2);",
+        "row('最新市場',tm(rp.latest_market_ts))+row('Learning phase',lr.phase||lr.runtime_status||'—')+row('本輪新增樣本',lr.v5_samples_added??0)+row('價格補資料目標',lr.price_backfill_target?(lr.price_backfill_target.asset+' '+lr.price_backfill_target.tf):'無')+row('Core source freeze',(lr.derivative_backfill||{}).core_frozen?'已鎖定':'等待核心來源完成')+row('Frozen OI',((lr.derivative_backfill||{}).frozen_core_oi||[]).join(', ')||'模型全代遮罩')+row('Frozen funding',((lr.derivative_backfill||{}).frozen_core_funding||[]).join(', ')||'模型全代遮罩')+row('Frozen enrichment',((lr.derivative_backfill||{}).frozen_enrichment||[]).join(', ')||'模型全代遮罩')+row('Price gap',((lr.price_gap_repair||{}).status)||(((lr.price_gap_summary||{}).counts||{}).PENDING_REPAIR?'修復中':'無'));let pb=lr.replay_price_blocker||{};$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:pb.blocked?`<div class=\"notice y\"><b>Strict Replay 正在修復真實價格缺口：</b>${esc(pb.reason||'price gap')}<br>時間：${tm(pb.at_ts)}</div>`:lr.blocker?`<div class=\"notice y\"><b>目前學習狀態：</b>${esc(lr.blocker)}</div>`:'';if($('derivSources'))$('derivSources').textContent=JSON.stringify({derivatives:lr.derivative_backfill||{},resilience:lr.data_resilience||{},gaps:lr.price_gap_summary||{},provider_notices:lr.provider_notices||[]},null,2);",
     )
     html = html.replace(
         "async function setEq(){",
