@@ -20,5 +20,7 @@ jobs:
           -e DATABASE_PATH=/tmp/eth-adaptive-docker-ci.db
           -e STRICT_REPLAY_BATCH_DECISIONS=2000
           -e SQLITE_BUSY_TIMEOUT_MS=20000
+          -e STRICT_GAP_REPAIR_ROUNDS=2
+          -e STRICT_MAX_QUARANTINED_GAPS=24
           eth-adaptive-ci
-          python -c "import server, v14_operational_throughput; assert server.app.version == '8.2.3'; assert server.core.state.get('runtime_version') == '8.2.3-20260810'; assert server.core.state.get('strict_replay',{}).get('operational_throughput',{}).get('replay_batch_decisions') == 2000; print('docker-runtime-ok')"
+          python -c "import server, v14_operational_throughput, v15_data_resilience; assert server.app.version == '8.3.0'; assert server.core.state.get('runtime_version') == '8.3.0-20260810'; s=server.core.state.get('strict_replay',{}); assert s.get('data_resilience',{}).get('schema') == 1; assert s.get('data_resilience',{}).get('provider_retention_is_capability_not_replay_error') is True; assert s.get('learning_scheduler',{}).get('internal_price_gap_targeted_repair') is True; assert server.core.get_state('final_data_resilience_schema') == 1; print('docker-runtime-8.3.0-ok')"
