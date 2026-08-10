@@ -26,23 +26,26 @@ jobs:
         run: python -m unittest -v
       - name: Runtime import smoke test
         env:
-          DATABASE_PATH: /tmp/eth-final-data-resilience-ci.db
+          DATABASE_PATH: /tmp/eth-runtime-integrity-ci.db
           STRICT_REPLAY_BATCH_DECISIONS: 2000
           SQLITE_BUSY_TIMEOUT_MS: 20000
           STRICT_GAP_REPAIR_ROUNDS: 2
           STRICT_MAX_QUARANTINED_GAPS: 24
         run: >-
           python -c "import os; p=os.environ['DATABASE_PATH']; [os.remove(x) for x in (p,p+'-wal',p+'-shm') if os.path.exists(x)];
-          import server, execution_v7, v5_runtime, adaptive_v5, v7_runtime, v8_evolution, v9_final, v9_readiness, v10_final_integrity, v11_sqlite_stability, v12_clean_baseline, v13_replay_cursor_integrity, v14_operational_throughput, v15_data_resilience;
-          assert server.app.version == '8.3.0'; assert server.core.state.get('runtime_version') == '8.3.0-20260810';
+          import server, execution_v7, v5_runtime, adaptive_v5, v7_runtime, v7_learning_guard, v8_evolution, v9_final, v9_readiness, v10_final_integrity, v11_sqlite_stability, v12_clean_baseline, v13_replay_cursor_integrity, v14_operational_throughput, v15_data_resilience, v16_runtime_integrity;
+          assert server.app.version == '8.4.0'; assert server.core.state.get('runtime_version') == '8.4.0-20260810';
           assert server.core.state.get('risk_monitor_mode') == 'GATE_PUBLIC_TRADES_ORDERED'; assert server.core.state.get('stability_mode') == 'SUBSYSTEM_ISOLATED_FAIL_CLOSED';
           s=server.core.state.get('strict_replay',{}); assert s.get('htf_close_time_required') is True; assert s.get('audit_can_mutate_policy') is False;
           assert s.get('training_store',{}).get('full_span_sampling') is True; assert s.get('live_parity',{}).get('canonical_derivative_features') is True;
           assert s.get('learning_scheduler',{}).get('provider_retention_limit_cannot_deadlock') is True; assert s.get('learning_scheduler',{}).get('internal_price_gap_targeted_repair') is True;
-          assert s.get('learning_scheduler',{}).get('fixed_price_fallback_priority') == ['gate','bybit','binance','okx'];
+          assert s.get('learning_scheduler',{}).get('fixed_price_fallback_priority') == ['gate','bybit','binance','okx']; assert s.get('learning_scheduler',{}).get('replay_completion_uses_latest_legally_labelable_decision') is True;
           dr=s.get('data_resilience',{}); assert dr.get('schema') == 1; assert dr.get('provider_retention_is_capability_not_replay_error') is True;
           assert dr.get('range_limited_derivatives_excluded_from_historical_model') is True; assert dr.get('internal_price_gaps_auto_repaired_across_exchanges') is True;
           assert dr.get('unrecoverable_price_gaps_never_interpolated') is True; assert dr.get('future_prices_never_used_as_features') is True;
+          ri=s.get('runtime_integrity',{}); assert ri.get('replay_progress_schema') == 4; assert ri.get('completion_is_latest_legally_labelable_decision') is True;
+          assert ri.get('live_market_edge_is_not_a_replay_completion_target') is True; assert ri.get('legacy_manual_training_bypass_closed') is True;
+          assert ri.get('single_composed_new_signal_entrance') is True; assert ri.get('clean_dataset_and_fresh_close_gate_cannot_be_bypassed_by_scan') is True; assert ri.get('runtime_patch_resets_historical_data') is False;
           assert s.get('final_integrity',{}).get('sample_schema') == 6; assert s.get('final_integrity',{}).get('signal_outcome_path') == '5m sequential bars after frozen 15m decision';
           assert s.get('overfit_guard',{}).get('overlapping_future_label_windows_cannot_count_as_independent_evidence') is True; assert s.get('overfit_guard',{}).get('clustered_ev_bootstrap_ci05_must_be_positive') is True;
           assert s.get('cursor_integrity',{}).get('unresolved_price_gap_can_advance_cursor') is False; assert s.get('cursor_integrity',{}).get('causal_outcome_precompute') is True;
@@ -50,12 +53,13 @@ jobs:
           prov=s.get('dataset_provenance',{}); assert prov.get('clean') is True; assert server.core.state.get('dataset_baseline',{}).get('status') == 'CLEAN'; assert server.core.state.get('dataset_baseline',{}).get('dataset_id');
           assert v8_evolution.GenomeEvolutionLearner.train_strategy_direction.__module__ == 'v10_overfit_guard'; assert adaptive_v5._stats.__module__ == 'v10_overfit_guard';
           assert execution_v7._signal_oof_opportunities.__module__ == 'v8_execution_oof'; assert execution_v7.optimize_all.__module__ == 'v12_clean_baseline'; assert execution_v7.simulate_policy.__module__ == 'v9_final';
-          assert v5_runtime.generate_learning_samples_v5.__module__ == 'v14_operational_throughput'; assert v5_runtime.train_v5.__module__ == 'v15_data_resilience';
+          assert v5_runtime.generate_learning_samples_v5.__module__ == 'v14_operational_throughput'; assert v5_runtime.train_v5.__module__ == 'v15_data_resilience'; assert v5_runtime._replay_progress.__module__ == 'v16_runtime_integrity';
           assert v10_final_integrity.generate_samples.__module__ == 'v15_data_resilience'; assert v10_final_integrity.strict_derivative_extras.__module__ == 'v15_data_resilience';
           assert v9_final._strict_derivative_extras.__module__ == 'v15_data_resilience'; assert v9_readiness._coinglass_ready_through.__module__ == 'v15_data_resilience';
-          assert server.core.load_bars.__module__ == 'v15_data_resilience'; assert server.core.learning_tick.__module__ == 'v15_data_resilience'; assert server.core._best_source.__module__ == 'v15_data_resilience';
+          assert server.core.load_bars.__module__ == 'v15_data_resilience'; assert server.core.learning_tick.__module__ == 'v16_runtime_integrity'; assert server.core._best_source.__module__ == 'v15_data_resilience';
+          assert v7_learning_guard.learning_tick_guarded.__module__ == 'v16_runtime_integrity'; assert v7_runtime.scan_v7.__module__ == 'v16_runtime_integrity'; assert server.core.train_if_due.__module__ == 'v16_runtime_integrity';
           assert server.core.scan_worker.__module__ == 'v11_sqlite_stability'; assert server.core.upsert_live_gate.__module__ == 'v14_operational_throughput';
           con=server.core.db(); assert con.execute('PRAGMA busy_timeout').fetchone()[0] == 20000; con.close();
           assert server.core.get_state('point_in_time_sample_schema') == 6; assert server.core.get_state('replay_cursor_integrity_schema') == 2; assert server.core.get_state('final_data_resilience_schema') == 1;
           import v5_async_runtime as lar; assert not lar._legacy_runtime_allowed(server.core);
-          print(server.app.version, server.core.state.get('runtime_version'), 'clean_dataset', 'data_resilience', 'canonical_price_fallback', 'provider_capability_guard', 'gap_repair', 'schema6', '5m_event_labels', 'horizon_clustered_oos', 'strict_replay', 'audit_no_mutation', 'legacy_v6_disabled')"
+          print(server.app.version, server.core.state.get('runtime_version'), 'matured_frontier_completion', 'certification_pipeline', 'safe_signal_entrance', 'manual_train_guard', 'clean_dataset', 'data_resilience', 'gap_repair', 'schema6', '5m_event_labels', 'horizon_clustered_oos', 'audit_no_mutation')"
