@@ -41,6 +41,7 @@ from v10_notice import install as install_final_notice
 from v11_sqlite_stability import install as install_sqlite_stability
 from v12_clean_baseline import install as install_clean_baseline
 from v13_replay_cursor_integrity import install as install_replay_cursor_integrity
+from v14_operational_throughput import install as install_operational_throughput
 
 install_storage_guard_early(core)
 install_v5(core)
@@ -102,11 +103,12 @@ install_overfit_guard(core)
 install_final_notice(core)
 install_sqlite_stability(core)
 install_clean_baseline(core)
-# Installed last: unresolved historical price gaps cannot be skipped, and the 8.2.2
-# first-real-sample feature-builder contract is enforced before any labels are written.
+# Cursor integrity stays authoritative for legal historical decisions. 8.2.3 then
+# changes only I/O/compute scheduling: no sample-density, label, OOS or audit semantics.
 install_replay_cursor_integrity(core)
+install_operational_throughput(core)
 
-RUNTIME_VERSION = '8.2.2-20260810'
+RUNTIME_VERSION = '8.2.3-20260810'
 core.state['runtime_version'] = RUNTIME_VERSION
 core.state.setdefault('strict_replay', {})['runtime'] = RUNTIME_VERSION
 core.state['strict_replay']['learning_scheduler'] = {
@@ -118,8 +120,10 @@ core.state['strict_replay']['learning_scheduler'] = {
     'optional_source_cannot_deadlock': True,
     'unresolved_price_gap_cannot_advance_replay_cursor': True,
     'feature_builder_contract_verified': True,
+    'throughput_io_optimized': True,
+    'performance_patch_resets_clean_dataset': False,
 }
-core.app.version = '8.2.2'
+core.app.version = '8.2.3'
 
 app = core.app
 PORT = core.PORT
@@ -131,10 +135,10 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 def dashboard() -> str:
     html = Path('dashboard_v721.html').read_text(encoding='utf-8')
     html = (
-        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.2.2 Final Clean Baseline')
+        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.2.3 Final Clean Baseline')
         .replace(
             'Walk-Forward Evolution · Storage Identity Guard · Subsystem-Isolated Fail-Closed',
-            'Clean Dataset · Strict Replay Cursor Integrity · 5m Event Labels · Anti-Overfit OOS · SQLite Guard',
+            'Clean Dataset · Strict Replay Cursor Integrity · 5m Event Labels · Anti-Overfit OOS · SQLite Fairness',
         )
     )
     html = html.replace('2020→現在 K 線覆蓋（直接查 DB）', '原始價格資料覆蓋（必要時框）')
@@ -153,7 +157,7 @@ def dashboard() -> str:
     )
     html = html.replace(
         '@media(max-width:390px){.healthgrid{grid-template-columns:1fr}.row b{max-width:60%}}',
-        '@media(max-width:560px){.healthgrid{grid-template-columns:1fr}.row b{max-width:62%}.health{padding:13px}.health .stat{font-size:14px}.top{gap:8px}.badge{padding:7px 10px;font-size:11px}}@media(max-width:360px){.hero{grid-template-columns:1fr}.row b{max-width:58%}}',
+        '@media(max-width:560px){.healthgrid{grid-template-columns:1fr}.row b{max-width:62%}.health{padding:13px}.health .stat{font-size:14px}.top{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;align-items:start}.top>div{min-width:0}.top h1{overflow-wrap:anywhere;word-break:break-word}.badge{justify-self:start;position:static;padding:7px 10px;font-size:11px}}@media(max-width:360px){.hero{grid-template-columns:1fr}.row b{max-width:58%}}',
     )
     html = html.replace(
         '<div class="k">模型信心 / 門檻</div>',
