@@ -1,8 +1,10 @@
+import math
 import sqlite3
 import tempfile
 import unittest
 
 import v5_runtime
+import v10_final_integrity as final
 import v13_replay_cursor_integrity as guard
 
 
@@ -25,6 +27,27 @@ class Core:
         return self.saved.get(key, default)
     def set_state(self, key, value):
         self.saved[key] = value
+
+
+def synthetic_15m(n=260):
+    rows = []
+    base = 1500.0
+    for i in range(n):
+        drift = i * 0.18 + math.sin(i / 7.0) * 4.5 + math.sin(i / 23.0) * 9.0
+        close = base + drift
+        open_ = close - math.sin(i / 5.0) * 1.3
+        high = max(open_, close) + 3.2 + (i % 4) * .25
+        low = min(open_, close) - 3.0 - (i % 3) * .2
+        rows.append({'ts': 1577836800 + i * 900, 'o': open_, 'h': high, 'l': low, 'c': close, 'v': 1000 + i, 'qv': 0})
+    return rows
+
+
+def synthetic_future5(close, start_ts):
+    rows = []
+    for j in range(96):
+        center = close + math.sin(j / 4.0) * 7.0 + j * .04
+        rows.append({'ts': start_ts + j * 300, 'o': center - .5, 'h': center + 4.2, 'l': center - 4.0, 'c': center, 'v': 100})
+    return rows
 
 
 class ReplayCursorIntegrityTests(unittest.TestCase):
@@ -53,6 +76,30 @@ class ReplayCursorIntegrityTests(unittest.TestCase):
             build_features = {'wrong': 'dict'}
         with self.assertRaisesRegex(TypeError, 'must be callable'):
             guard._build_model_features(BrokenCore(), [], [], [], {}, {})
+
+    def test_causal_prefix_ema_and_atr_match_reference(self):
+        m15 = synthetic_15m()
+        ema20 = guard._ema20_prefix(m15)
+        tr = guard._true_ranges(m15)
+        for i in (40, 100, 180, 240):
+            past = m15[:i + 1]
+            self.assertAlmostEqual(ema20[i], final.signal.ema([final.signal.f(x['c']) for x in past], 20), places=12)
+            self.assertAlmostEqual(guard._atr14_at(tr, i), final.signal.atr(past), places=12)
+
+    def test_precomputed_5m_outcomes_match_reference_for_every_strategy_direction(self):
+        m15 = synthetic_15m()
+        ema20 = guard._ema20_prefix(m15)
+        tr = guard._true_ranges(m15)
+        for i in (120, 180, 220):
+            future5 = synthetic_future5(float(m15[i]['c']), int(m15[i]['ts']) + 900)
+            atr14 = guard._atr14_at(tr, i)
+            for strategy in final.signal.STRATEGIES:
+                for direction in final.signal.DIRECTIONS:
+                    ref = final.strategy_outcome_5m(m15, i, future5, strategy, direction)
+                    fast = guard._strategy_outcome_5m_precomputed(m15, i, future5, strategy, direction, ema20[i], atr14)
+                    self.assertEqual(ref[0], fast[0], (strategy, direction, i, ref, fast))
+                    for a, b in zip(ref[1:], fast[1:]):
+                        self.assertAlmostEqual(a, b, places=12, msg=str((strategy, direction, i, ref, fast)))
 
     def test_integrity_reset_preserves_raw_cache_and_dataset_marker(self):
         with tempfile.NamedTemporaryFile(suffix='.db') as f:
