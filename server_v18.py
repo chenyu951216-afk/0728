@@ -5,9 +5,15 @@ from fastapi.responses import HTMLResponse
 
 import server_v17 as base
 from v18_final_system import install as install_final_system
+from v18_operational_guard import preflight_source_provenance, install as install_operational_guard
 
 core = base.core
+# Resolve cross-version source provenance BEFORE the final authority is allowed to
+# certify anything. If persistent source semantics were lost, only derived labels are
+# rebuilt; raw market/derivative caches and the CLEAN Dataset ID are preserved.
+preflight_source_provenance(core)
 install_final_system(core)
+install_operational_guard(core)
 
 RUNTIME_VERSION = '9.0.0-20260811'
 core.state['runtime_version'] = RUNTIME_VERSION
@@ -47,7 +53,7 @@ async function refreshFinal18(){
   if(!root) return;
   try{
     const z=await fetch('/api/v18/final-status',{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()});
-    const audit=((z.dataset||{}).audit)||{}, base=((z.dataset||{}).baseline)||{}, rp=z.replay||{}, sm=z.samples||{}, c=z.certification||{}, sc=z.source_contract||{}, dc=z.discord||{}, live=z.live_learning||{};
+    const audit=((z.dataset||{}).audit)||{}, base=((z.dataset||{}).baseline)||{}, rp=z.replay||{}, sm=z.samples||{}, c=z.certification||{}, sc=z.source_contract||{}, dc=z.discord||{}, live=z.live_learning||{}, sp=z.source_provenance_preflight||{};
     const good=(audit.valid===true && base.status==='CLEAN');
     const full=(z.status==='FULLY_OPERATIONAL');
     root.className='notice '+(full?'g':(good?'y':'r'));
@@ -58,6 +64,7 @@ async function refreshFinal18(){
     grid.innerHTML=
       v18box('Strict Replay',v18pct(rp.percent),rp.complete?'ok':'warn',rp.complete?'合法 label frontier 已追平':'剩餘成熟決策 '+String(rp.pending_eligible_decisions??'—'))+
       v18box('Derived Audit',audit.status||'—',audit.valid?'ok':'bad',audit.reason||'')+
+      v18box('Source Provenance',sp.status||'—',(sp.status==='PERSISTENT_SOURCE_CONTRACT_RECOVERED'||sp.status==='NO_EXISTING_DERIVED_SAMPLES'||sp.status==='DERIVED_REBUILD_ALREADY_APPLIED'||sp.status==='DERIVED_REBUILD_REQUIRED_AND_APPLIED')?'ok':'warn',sp.reason||'跨版本來源契約檢查')+
       v18box('Signal Certification',String(c.signal_champions??0)+' Champion',Number(c.signal_champions||0)>0?'ok':'warn','7策略 × LONG/SHORT；genome/OOS/anti-overfit')+
       v18box('Execution Audit',String(c.execution_champions??0)+' Champion',Number(c.execution_champions||0)>0?'ok':'warn','Entry/SL/TP/分批/BE/trailing + untouched audit')+
       v18box('Regime Specialists',String(Object.keys(port).length)+' regimes',Object.keys(port).length?'ok':'warn','不同市場階段只使用已認證 specialist')+
