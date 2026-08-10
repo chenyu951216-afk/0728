@@ -43,6 +43,7 @@ from v12_clean_baseline import install as install_clean_baseline
 from v13_replay_cursor_integrity import install as install_replay_cursor_integrity
 from v14_operational_throughput import install as install_operational_throughput
 from v15_data_resilience import install as install_data_resilience
+from v16_runtime_integrity import install as install_runtime_integrity
 
 install_storage_guard_early(core)
 install_v5(core)
@@ -106,11 +107,13 @@ install_sqlite_stability(core)
 install_clean_baseline(core)
 install_replay_cursor_integrity(core)
 install_operational_throughput(core)
-# Final authority: provider capability ranges, canonical multi-exchange price fallback,
-# targeted gap repair/quarantine, and model-feature source consistency.
+# Provider capability ranges, canonical multi-exchange price fallback and real-gap recovery.
 install_data_resilience(core)
+# Final runtime authority: matured-label replay completion, certification pipeline,
+# safe manual training and one composed live signal entrance.
+install_runtime_integrity(core)
 
-RUNTIME_VERSION = '8.3.0-20260810'
+RUNTIME_VERSION = '8.4.0-20260810'
 core.state['runtime_version'] = RUNTIME_VERSION
 core.state.setdefault('strict_replay', {})['runtime'] = RUNTIME_VERSION
 core.state['strict_replay']['learning_scheduler'] = {
@@ -128,8 +131,12 @@ core.state['strict_replay']['learning_scheduler'] = {
     'feature_builder_contract_verified': True,
     'throughput_io_optimized': True,
     'performance_patch_resets_clean_dataset': False,
+    'replay_completion_uses_latest_legally_labelable_decision': True,
+    'live_market_edge_is_not_completion_target': True,
+    'single_composed_live_signal_entrance': True,
+    'legacy_manual_training_bypass_closed': True,
 }
-core.app.version = '8.3.0'
+core.app.version = '8.4.0'
 
 app = core.app
 PORT = core.PORT
@@ -141,14 +148,14 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 def dashboard() -> str:
     html = Path('dashboard_v721.html').read_text(encoding='utf-8')
     html = (
-        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.3.0 Final Data Resilience')
+        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.4.0 Runtime Integrity')
         .replace(
             'Walk-Forward Evolution · Storage Identity Guard · Subsystem-Isolated Fail-Closed',
-            'Clean Dataset · No-Lookahead Strict Replay · Multi-Exchange Gap Recovery · Provider Capability Guard · Anti-Overfit OOS',
+            'Clean Dataset · Matured-Label Strict Replay · Multi-Exchange Gap Recovery · OOS Signal + Walk-Forward Execution',
         )
     )
     html = html.replace('2020→現在 K 線覆蓋（直接查 DB）', '原始價格資料覆蓋（必要時框）')
-    html = html.replace('無 HTF look-ahead 樣本重播', 'Strict Replay 時間游標進度')
+    html = html.replace('無 HTF look-ahead 樣本重播', 'Strict Replay 合法 Label 最前端進度')
     html = html.replace(
         '.s{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.45}',
         '.s{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.45;overflow-wrap:anywhere;word-break:break-word}',
@@ -183,11 +190,15 @@ def dashboard() -> str:
     )
     html = html.replace(
         '<div id="learnMeta" style="margin-top:12px"></div><div id="learnError"></div></section>',
-        '<div id="learnMeta" style="margin-top:12px"></div><div id="learnError"></div><details><summary>查看資料來源 / gap readiness</summary><pre id="derivSources">—</pre></details></section>',
+        '<div id="learnMeta" style="margin-top:12px"></div><div id="learnError"></div><details><summary>查看資料來源 / gap / certification readiness</summary><pre id="derivSources">—</pre></details></section>',
     )
     html = html.replace(
         "row('最新市場',tm(rp.latest_market_ts));$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:'';",
-        "row('最新市場',tm(rp.latest_market_ts))+row('Learning phase',lr.phase||lr.runtime_status||'—')+row('本輪新增樣本',lr.v5_samples_added??0)+row('價格補資料目標',lr.price_backfill_target?(lr.price_backfill_target.asset+' '+lr.price_backfill_target.tf):'無')+row('Core source freeze',(lr.derivative_backfill||{}).core_frozen?'已鎖定':'等待核心來源完成')+row('Frozen OI',((lr.derivative_backfill||{}).frozen_core_oi||[]).join(', ')||'模型全代遮罩')+row('Frozen funding',((lr.derivative_backfill||{}).frozen_core_funding||[]).join(', ')||'模型全代遮罩')+row('Frozen enrichment',((lr.derivative_backfill||{}).frozen_enrichment||[]).join(', ')||'模型全代遮罩')+row('Price gap',((lr.price_gap_repair||{}).status)||(((lr.price_gap_summary||{}).counts||{}).PENDING_REPAIR?'修復中':'無'));let pb=lr.replay_price_blocker||{};$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:pb.blocked?`<div class=\"notice y\"><b>Strict Replay 正在修復真實價格缺口：</b>${esc(pb.reason||'price gap')}<br>時間：${tm(pb.at_ts)}</div>`:lr.blocker?`<div class=\"notice y\"><b>目前學習狀態：</b>${esc(lr.blocker)}</div>`:'';if($('derivSources'))$('derivSources').textContent=JSON.stringify({derivatives:lr.derivative_backfill||{},resilience:lr.data_resilience||{},gaps:lr.price_gap_summary||{},provider_notices:lr.provider_notices||[]},null,2);",
+        "row('最新市場',tm(rp.latest_market_ts))+row('合法 Label 最前端',tm(rp.legal_frontier_ts))+row('Label 成熟緩衝',rp.expected_label_maturity_buffer_seconds!=null?n(rp.expected_label_maturity_buffer_seconds/3600,2)+' 小時':'—')+row('待處理成熟決策',rp.pending_eligible_decisions??'—')+row('Learning phase',lr.phase||lr.runtime_status||'—')+row('本輪新增樣本',lr.v5_samples_added??0)+row('總學習樣本',((lr.certification_pipeline||{}).learning_samples??'—'))+row('正式認證階段',(lr.certification_pipeline||{}).stage||'—')+row('Signal / Execution Champion',`${(lr.certification_pipeline||{}).signal_champions??0} / ${(lr.certification_pipeline||{}).execution_champions??0}`)+row('價格補資料目標',lr.price_backfill_target?(lr.price_backfill_target.asset+' '+lr.price_backfill_target.tf):'無')+row('Core source freeze',(lr.derivative_backfill||{}).core_frozen?'已鎖定':'等待核心來源完成')+row('Frozen OI',((lr.derivative_backfill||{}).frozen_core_oi||[]).join(', ')||'模型全代遮罩')+row('Frozen funding',((lr.derivative_backfill||{}).frozen_core_funding||[]).join(', ')||'模型全代遮罩')+row('Frozen enrichment',((lr.derivative_backfill||{}).frozen_enrichment||[]).join(', ')||'模型全代遮罩')+row('Price gap',((lr.price_gap_repair||{}).status)||(((lr.price_gap_summary||{}).counts||{}).PENDING_REPAIR?'修復中':'無'));let pb=lr.replay_price_blocker||{},pipe=lr.certification_pipeline||{};$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:pb.blocked?`<div class=\"notice y\"><b>Strict Replay 正在修復真實價格缺口：</b>${esc(pb.reason||'price gap')}<br>時間：${tm(pb.at_ts)}</div>`:lr.blocker?`<div class=\"notice y\"><b>目前學習狀態：</b>${esc(lr.blocker)}</div>`:pipe.stage?`<div class=\"notice ${pipe.stage==='FULLY_OPERATIONAL'?'g':'y'}\"><b>${esc(pipe.stage)}</b><br>${esc(pipe.reason||'')}</div>`:'';if($('derivSources'))$('derivSources').textContent=JSON.stringify({derivatives:lr.derivative_backfill||{},resilience:lr.data_resilience||{},gaps:lr.price_gap_summary||{},certification:pipe,provider_notices:lr.provider_notices||[]},null,2);",
+    )
+    html = html.replace(
+        "let active=(sigs||[]).find(s=>s.status==='OPEN'||s.status==='PLANNED');renderSignal(active);",
+        "let eqv=Number(x.account_equity_usdt||0);$('equity').textContent=eqv>0?`${n(eqv)} USDT`:'—';let active=(sigs||[]).find(s=>s.status==='OPEN'||s.status==='PLANNED');renderSignal(active);if(!active)$('sizing').innerHTML=eqv>0?'資金已保存。等待正式訊號後依真正初始 SL 距離計算 2% 風險名目倉位。':'請先設定帳戶餘額。';",
     )
     html = html.replace(
         "async function setEq(){",
