@@ -35,18 +35,42 @@ def dashboard() -> str:
 <div id="cert17" class="notice">讀取正式認證狀態…</div>
 <details><summary>查看 14 個策略×方向認證結果</summary><pre id="cert17detail">—</pre></details></section>
 '''
-    html = html.replace('</div><div class="footer">', cert_card + '</div><div class="footer">')
-    script = r'''
-async function refreshCert17(){try{
- let z=await fetch('/api/v17/certification').then(r=>r.json()),a=z.audit||{},c=z.certification||{},p=z.pipeline||{},el=$('cert17');
- let cls=(a.valid&&(c.status==='SIGNAL_CHAMPION_CERTIFIED'||c.status==='NO_SIGNAL_MODEL_PASSED_OOS'||c.status==='SIGNAL_CERTIFICATION_RUNNING'||c.status==='NOT_STARTED'||c.status==='WAITING_FOR_REPLAY'))?'g':(c.status==='SIGNAL_CERTIFICATION_FAILED'||a.status==='FAILED'?'r':'y');
- el.className='notice '+cls;
- el.innerHTML=`<b>${esc(c.status||'NOT_STARTED')}</b><br>${esc(c.reason||'等待正式認證')}<br>Derived audit：<b>${esc(a.status||'—')}</b>｜samples ${Number(a.learning_samples||0).toLocaleString()}｜decision timestamps ${Number(a.decision_timestamps||0).toLocaleString()}｜14-row partial ${Number(a.partial_decision_timestamps||0).toLocaleString()}<br>Signal / Execution Champion：${p.signal_champions??0} / ${p.execution_champions??0}`;
- $('cert17detail').textContent=JSON.stringify({audit:a,certification:c,pipeline:p},null,2);
-}catch(e){let el=$('cert17');if(el){el.className='notice r';el.textContent='Certification endpoint 讀取失敗：'+String(e)}}}
-refreshCert17();setInterval(refreshCert17,5000);
-'''
-    html = html.replace('</script></body></html>', script + '</script></body></html>')
+    # Put the card inside the existing grid but do not touch existing script text.
+    grid_close = '</div><div class="footer">'
+    if grid_close in html:
+        html = html.replace(grid_close, cert_card + grid_close, 1)
+
+    # Keep v17 JS in its own script tag. Never splice source text into an existing
+    # script block: that made presentation syntax depend on legacy dashboard endings.
+    script = r'''<script id="v17-certification-script">
+async function refreshCert17(){
+  try{
+    const z=await fetch('/api/v17/certification').then(r=>r.json());
+    const a=z.audit||{}, c=z.certification||{}, p=z.pipeline||{}, el=document.getElementById('cert17');
+    if(!el) return;
+    const acceptable=['SIGNAL_CHAMPION_CERTIFIED','NO_SIGNAL_MODEL_PASSED_OOS','SIGNAL_CERTIFICATION_RUNNING','NOT_STARTED','WAITING_FOR_REPLAY'];
+    const cls=(a.valid&&acceptable.includes(c.status))?'g':((c.status==='SIGNAL_CERTIFICATION_FAILED'||a.status==='FAILED')?'r':'y');
+    el.className='notice '+cls;
+    const safe=(typeof esc==='function')?esc:(x=>String(x??'—'));
+    el.innerHTML='<b>'+safe(c.status||'NOT_STARTED')+'</b><br>'+safe(c.reason||'等待正式認證')+
+      '<br>Derived audit：<b>'+safe(a.status||'—')+'</b>｜samples '+Number(a.learning_samples||0).toLocaleString()+
+      '｜decision timestamps '+Number(a.decision_timestamps||0).toLocaleString()+
+      '｜14-row partial '+Number(a.partial_decision_timestamps||0).toLocaleString()+
+      '<br>Signal / Execution Champion：'+String(p.signal_champions??0)+' / '+String(p.execution_champions??0);
+    const detail=document.getElementById('cert17detail');
+    if(detail) detail.textContent=JSON.stringify({audit:a,certification:c,pipeline:p},null,2);
+  }catch(e){
+    const el=document.getElementById('cert17');
+    if(el){el.className='notice r';el.textContent='Certification endpoint 讀取失敗：'+String(e)}
+  }
+}
+refreshCert17();
+setInterval(refreshCert17,5000);
+</script>'''
+    if '</body>' in html:
+        html = html.replace('</body>', script + '</body>', 1)
+    else:
+        html += script
     return html
 
 
