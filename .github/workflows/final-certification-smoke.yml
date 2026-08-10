@@ -1,0 +1,26 @@
+name: Final certification smoke
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  final-certification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production image
+        run: docker build -t eth-adaptive-final .
+      - name: Validate final runtime inside production image
+        run: >-
+          docker run --rm
+          -e DATABASE_PATH=/tmp/eth-final-certification-ci.db
+          -e STRICT_REPLAY_BATCH_DECISIONS=2000
+          -e SQLITE_BUSY_TIMEOUT_MS=20000
+          -e STRICT_GAP_REPAIR_ROUNDS=2
+          -e STRICT_MAX_QUARANTINED_GAPS=24
+          eth-adaptive-final
+          python -c "import server_v17, v5_runtime, v17_certification_orchestrator as v17; assert server_v17.app.version == '8.4.1'; assert server_v17.core.state.get('runtime_version') == '8.4.1-20260810'; s=server_v17.core.state.get('strict_replay',{}); c=s.get('certification_orchestrator',{}); assert c.get('replay_completion_triggers_signal_certification_immediately') is True; assert c.get('legacy_due_counter_cannot_strand_completed_replay') is True; assert c.get('derived_cross_version_data_is_audited_before_reuse') is True; assert c.get('hard_derived_corruption_auto_rebuilds_derived_only') is True; assert c.get('raw_market_preserved_on_derived_rebuild') is True; assert c.get('clean_dataset_id_preserved_on_derived_rebuild') is True; assert v5_runtime.train_v5.__module__ == 'v17_certification_orchestrator'; assert server_v17.core.train_if_due.__module__ == 'v17_certification_orchestrator'; print('final-runtime-8.4.1-certification-ok')"
