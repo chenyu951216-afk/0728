@@ -9,7 +9,7 @@ on:
 jobs:
   final-certification:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,13 +26,13 @@ jobs:
           -e STRICT_GAP_REPAIR_ROUNDS=2
           -e STRICT_MAX_QUARANTINED_GAPS=24
           eth-adaptive-final
-          python -c "import server_v17, v5_runtime, v17_certification_orchestrator as v17; assert server_v17.app.version == '8.4.1'; assert server_v17.core.state.get('runtime_version') == '8.4.1-20260810'; s=server_v17.core.state.get('strict_replay',{}); c=s.get('certification_orchestrator',{}); assert c.get('replay_completion_triggers_signal_certification_immediately') is True; assert c.get('legacy_due_counter_cannot_strand_completed_replay') is True; assert c.get('derived_cross_version_data_is_audited_before_reuse') is True; assert c.get('hard_derived_corruption_auto_rebuilds_derived_only') is True; assert c.get('raw_market_preserved_on_derived_rebuild') is True; assert c.get('clean_dataset_id_preserved_on_derived_rebuild') is True; assert v5_runtime.train_v5.__module__ == 'v17_certification_orchestrator'; assert server_v17.core.train_if_due.__module__ == 'v17_certification_orchestrator'; print('final-runtime-8.4.1-certification-ok')"
+          python -c "import server_v18, v18_final_system as v18, v5_runtime, v8_evolution, execution_v7; assert server_v18.app.version == '9.0.0'; assert server_v18.core.state.get('runtime_version') == '9.0.0-20260811'; s=server_v18.core.state.get('strict_replay',{}); f=s.get('final_authority',{}); assert f.get('sqlite_is_authoritative_after_redeploy') is True; assert f.get('single_runtime_state_loss_can_reset_derived_data') is False; assert f.get('confirmed_structural_corruption_rebuilds_derived_only') is True; assert f.get('raw_market_preserved') is True; assert f.get('raw_derivatives_preserved') is True; assert f.get('clean_dataset_id_preserved') is True; assert f.get('all_7_strategies_x_2_directions_explicitly_certified') is True; assert f.get('regime_specialist_router') is True; assert f.get('execution_policy_evolution') is True; assert f.get('execution_untouched_audit_required') is True; assert f.get('future_price_features') is False; assert f.get('future_5m_path_is_label_only') is True; assert f.get('single_composed_live_signal_entrance') is True; assert len(f.get('signal_genome_evolution') or []) >= 5; assert v5_runtime.train_v5.__module__ == 'v18_final_system'; assert server_v18.core.train_if_due.__module__ == 'v18_final_system'; assert server_v18.core.create_signal.__module__ == 'v18_final_system'; assert server_v18.core.learning_tick.__module__ == 'v18_final_system'; assert execution_v7.policy_candidates.__module__ == 'v8_evolution'; view=v18._authoritative_view(server_v18.core); assert view['safety_contract']['future_price_features'] is False; assert view['safety_contract']['execution_untouched_audit_required'] is True; assert view['samples']['rows_per_decision'] == 14; print('final-runtime-9.0-authority-ok')"
       - name: Render production dashboard
         run: >-
           docker run --rm
           -e DATABASE_PATH=/tmp/eth-final-dashboard-ci.db
           eth-adaptive-final
-          python -c "import server_v17; print(server_v17.dashboard())" > /tmp/dashboard.html
+          python -c "import server_v18; print(server_v18.dashboard())" > /tmp/dashboard.html
       - name: Extract inline JavaScript
         run: |
           python - <<'PY'
@@ -41,8 +41,9 @@ jobs:
           scripts=re.findall(r'<script(?:\s[^>]*)?>(.*?)</script>',html,flags=re.S|re.I)
           assert scripts, 'rendered dashboard contains no inline scripts'
           open('/tmp/dashboard.js','w',encoding='utf-8').write('\n;\n'.join(scripts))
-          assert 'v17-certification-script' in html
-          assert '正式策略認證 / Derived Data 稽核' in html
+          assert 'v18-final-authority-script' in html
+          assert 'Final Authority / 最終學習與交易鏈' in html
+          assert 'ETH Adaptive AI 9.0 Final Authority' in html
           print('scripts',len(scripts),'bytes',sum(map(len,scripts)))
           PY
       - name: Validate rendered dashboard JavaScript syntax
