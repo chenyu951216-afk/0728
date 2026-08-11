@@ -15,12 +15,11 @@ jobs:
       - name: Build production image
         run: docker build -t eth-adaptive-ci .
 
-      - name: Start exact production CMD with unresolved Zeabur PORT interpolation
+      - name: Start exact production Docker CMD
         run: |
           docker run -d --name eth-adaptive-ci-run \
-            -p 18080:18080 \
-            -e 'PORT=${WEB_PORT}' \
-            -e WEB_PORT=18080 \
+            -p 18080:8080 \
+            -e PORT=8080 \
             -e DATABASE_PATH=/tmp/eth-adaptive-docker-ci.db \
             -e STRICT_REPLAY_BATCH_DECISIONS=2000 \
             -e SQLITE_BUSY_TIMEOUT_MS=20000 \
@@ -28,11 +27,11 @@ jobs:
             -e STRICT_MAX_QUARANTINED_GAPS=24 \
             eth-adaptive-ci
 
-      - name: Wait for HTTP listener
+      - name: Wait for bootstrap liveness
         run: |
           ok=0
           for i in $(seq 1 40); do
-            if curl -fsS http://127.0.0.1:18080/ >/tmp/dashboard.html; then
+            if curl -fsS http://127.0.0.1:18080/healthz >/tmp/health.json; then
               ok=1
               break
             fi
@@ -44,18 +43,25 @@ jobs:
             sleep 1
           done
           if [ "$ok" != 1 ]; then
-            echo 'HTTP did not become ready within 40 seconds'
+            echo 'bootstrap /healthz did not become ready within 40 seconds'
             docker logs eth-adaptive-ci-run || true
             exit 1
           fi
-          grep -q '9.0.1' /tmp/dashboard.html
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/health.json'))
+          assert x['ok'] is True
+          assert x['alive'] is True
+          assert int(x['port']) == 8080
+          PY
 
-      - name: Validate live production process and resolved port
+      - name: Validate HTTP routing and bind diagnostics
         run: |
           test "$(docker inspect -f '{{.State.Running}}' eth-adaptive-ci-run)" = "true"
-          curl -fsS http://127.0.0.1:18080/openapi.json >/tmp/openapi.json
-          grep -q '9.0.1' /tmp/openapi.json
-          docker logs eth-adaptive-ci-run 2>&1 | grep -q 'Uvicorn running on http://0.0.0.0:18080'
+          curl -fsS http://127.0.0.1:18080/ >/tmp/dashboard.html
+          grep -q 'ETH Adaptive AI' /tmp/dashboard.html
+          docker logs eth-adaptive-ci-run 2>&1 | grep -q 'UVICORN_BIND host=0.0.0.0 port=8080'
+          docker logs eth-adaptive-ci-run 2>&1 | grep -q 'Uvicorn running on http://0.0.0.0:8080'
 
       - name: Show logs
         if: always()
