@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import logging
 import os
+import threading
 import traceback
 from contextlib import asynccontextmanager
 from typing import Any
@@ -17,8 +18,13 @@ logging.basicConfig(level=os.getenv('LOG_LEVEL', 'INFO'), format='%(asctime)s %(
 
 
 def _resolve_port() -> int:
-    """Resolve Zeabur's port without allowing a literal ${WEB_PORT} to crash import."""
-    for raw in (os.getenv('PORT', ''), os.getenv('WEB_PORT', ''), '8080'):
+    """Resolve Zeabur's externally published port safely.
+
+    Prefer WEB_PORT when the platform injects it. A manually configured PORT must not
+    override the platform-selected public port, otherwise the container can look
+    healthy internally while Zeabur's proxy reaches the wrong socket and returns 502.
+    """
+    for raw in (os.getenv('WEB_PORT', ''), os.getenv('PORT', ''), '8080'):
         try:
             value = int(str(raw).strip())
             if 1 <= value <= 65535:
@@ -32,49 +38,49 @@ def _resolve_port() -> int:
 
 PORT = _resolve_port()
 PRODUCTION_APP: Any | None = None
-PRODUCTION_MODULE: Any | None = None
 PRODUCTION_LIFESPAN: Any | None = None
-PRODUCTION_LOAD_TASK: asyncio.Task | None = None
+STARTUP_STATUS = 'BOOTING'
 STARTUP_ERROR_TYPE: str | None = None
 STARTUP_ERROR_TEXT: str | None = None
-STARTUP_STATUS = 'BOOTING'
+
+
+def _import_production_blocking() -> tuple[Any, Any]:
+    production = importlib.import_module('server_v19')
+    return production, production.app
 
 
 async def _load_production() -> None:
-    """Load the heavyweight runtime only after the bootstrap server has bound its port."""
-    global PRODUCTION_APP, PRODUCTION_MODULE, PRODUCTION_LIFESPAN
-    global STARTUP_ERROR_TYPE, STARTUP_ERROR_TEXT, STARTUP_STATUS
+    global PRODUCTION_APP, PRODUCTION_LIFESPAN
+    global STARTUP_STATUS, STARTUP_ERROR_TYPE, STARTUP_ERROR_TEXT
     STARTUP_STATUS = 'LOADING_PRODUCTION_RUNTIME'
     try:
-        production = await asyncio.to_thread(importlib.import_module, 'server_v19')
-        prod_app = production.app
-
+        _, prod_app = await asyncio.to_thread(_import_production_blocking)
         lifespan_cm = prod_app.router.lifespan_context(prod_app)
         await lifespan_cm.__aenter__()
-
-        PRODUCTION_MODULE = production
         PRODUCTION_LIFESPAN = lifespan_cm
         PRODUCTION_APP = prod_app
         STARTUP_STATUS = 'PRODUCTION_READY'
-        LOG.info('production runtime ready after bootstrap bind: version=%s', getattr(prod_app, 'version', 'unknown'))
-    except Exception as exc:
+        LOG.info('production runtime ready version=%s', getattr(prod_app, 'version', 'unknown'))
+    except BaseException as exc:
         STARTUP_ERROR_TYPE = type(exc).__name__
         STARTUP_ERROR_TEXT = f'{type(exc).__name__}: {exc}'
         STARTUP_STATUS = 'PRODUCTION_FAILED'
-        LOG.error('production runtime failed during background initialization: %s', STARTUP_ERROR_TEXT)
+        LOG.error('production runtime initialization failed: %s', STARTUP_ERROR_TEXT)
         LOG.error('%s', traceback.format_exc())
 
 
 @asynccontextmanager
 async def _bootstrap_lifespan(_: FastAPI):
-    global PRODUCTION_LOAD_TASK, PRODUCTION_LIFESPAN, STARTUP_STATUS
-    PRODUCTION_LOAD_TASK = asyncio.create_task(_load_production(), name='load-production-runtime')
+    LOG.info(
+        'bootstrap starting pid=%s thread=%s host=0.0.0.0 resolved_port=%s WEB_PORT=%r PORT=%r',
+        os.getpid(), threading.current_thread().name, PORT, os.getenv('WEB_PORT'), os.getenv('PORT'),
+    )
+    task = asyncio.create_task(_load_production(), name='load-production-runtime')
     yield
-
-    if PRODUCTION_LOAD_TASK and not PRODUCTION_LOAD_TASK.done():
-        PRODUCTION_LOAD_TASK.cancel()
+    if not task.done():
+        task.cancel()
         try:
-            await PRODUCTION_LOAD_TASK
+            await task
         except asyncio.CancelledError:
             pass
     if PRODUCTION_LIFESPAN is not None:
@@ -82,83 +88,55 @@ async def _bootstrap_lifespan(_: FastAPI):
             await PRODUCTION_LIFESPAN.__aexit__(None, None, None)
         except Exception:
             LOG.exception('production lifespan shutdown failed')
-    STARTUP_STATUS = 'STOPPED'
 
 
-bootstrap = FastAPI(
-    title='ETH Adaptive AI bootstrap',
-    version='9.0.3-bootstrap',
-    lifespan=_bootstrap_lifespan,
-)
+bootstrap = FastAPI(title='ETH Adaptive AI bootstrap', version='9.0.4-bootstrap', lifespan=_bootstrap_lifespan)
 
 
 @bootstrap.get('/healthz')
 def healthz() -> JSONResponse:
-    """Liveness only.
-
-    Zeabur/public proxies must see HTTP 200 as soon as the web process has bound the
-    port. Research/certification readiness is deliberately reported separately by
-    /readyz so a long SQLite/model preflight can never make an otherwise-live service
-    disappear behind a gateway 502.
-    """
-    ready = PRODUCTION_APP is not None
-    return JSONResponse(
-        status_code=200,
-        content={
-            'ok': True,
-            'alive': True,
-            'ready': ready,
-            'mode': 'PRODUCTION' if ready else 'FAIL_CLOSED_BOOTSTRAP',
-            'startup_status': STARTUP_STATUS,
-            'startup_error_type': STARTUP_ERROR_TYPE,
-            'trading_enabled': ready,
-            'port': PORT,
-        },
-    )
+    return JSONResponse(status_code=200, content={
+        'ok': True,
+        'liveness': True,
+        'startup_status': STARTUP_STATUS,
+        'startup_error_type': STARTUP_ERROR_TYPE,
+        'resolved_port': PORT,
+        'web_port_env': os.getenv('WEB_PORT'),
+        'port_env': os.getenv('PORT'),
+    })
 
 
 @bootstrap.get('/readyz')
 def readyz() -> JSONResponse:
-    """Readiness for the heavyweight production runtime, not process liveness."""
     ready = PRODUCTION_APP is not None
-    return JSONResponse(
-        status_code=200 if ready else 503,
-        content={
-            'ok': ready,
-            'ready': ready,
-            'startup_status': STARTUP_STATUS,
-            'startup_error_type': STARTUP_ERROR_TYPE,
-            'trading_enabled': ready,
-            'port': PORT,
-        },
-    )
+    return JSONResponse(status_code=200 if ready else 503, content={
+        'ok': ready,
+        'ready': ready,
+        'startup_status': STARTUP_STATUS,
+        'startup_error_type': STARTUP_ERROR_TYPE,
+        'resolved_port': PORT,
+    })
 
 
 @bootstrap.get('/', response_class=HTMLResponse)
 def bootstrap_dashboard() -> str:
-    status = STARTUP_STATUS
     err = STARTUP_ERROR_TEXT or '—'
-    return f'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ETH Adaptive AI</title><style>body{{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#071426;color:#e8f0ff;margin:0;padding:28px}}.card{{max-width:760px;margin:40px auto;padding:24px;border:1px solid #29466d;border-radius:20px;background:#0b1b31}}h1{{margin-top:0}}.warn{{color:#ffd36e}}.bad{{color:#ff7187}}code{{word-break:break-word}}</style></head><body><div class="card"><h1>ETH Adaptive AI 9.0.3</h1><h2 class="{'bad' if STARTUP_ERROR_TYPE else 'warn'}">HTTP 已啟動 · 正式 Runtime {status}</h2><p>Zeabur Port 已先完成監聽。正式研究、認證與交易 Runtime 正在背景初始化；完成前所有新訊號與交易皆 fail-closed。</p><p>監聽 Port：<code>{PORT}</code></p><p>錯誤：<code>{err}</code></p><p>既有 SQLite / Volume 不會因 bootstrap 被清除。</p></div></body></html>'''
+    return f'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ETH Adaptive AI</title><style>body{{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#071426;color:#e8f0ff;margin:0;padding:28px}}.card{{max-width:760px;margin:40px auto;padding:24px;border:1px solid #29466d;border-radius:20px;background:#0b1b31}}h1{{margin-top:0}}.warn{{color:#ffd36e}}.bad{{color:#ff7187}}code{{word-break:break-word}}</style></head><body><div class="card"><h1>ETH Adaptive AI 9.0.4</h1><h2 class="{'bad' if STARTUP_ERROR_TYPE else 'warn'}">Bootstrap HTTP ONLINE · {STARTUP_STATUS}</h2><p>Resolved port: <code>{PORT}</code></p><p>WEB_PORT env: <code>{os.getenv('WEB_PORT') or '—'}</code></p><p>PORT env: <code>{os.getenv('PORT') or '—'}</code></p><p>正式 Runtime 完成前，新訊號與交易維持 fail-closed。</p><p>錯誤：<code>{err}</code></p></div></body></html>'''
 
 
 @bootstrap.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'])
 async def bootstrap_fallback(path: str, request: Request) -> JSONResponse:
     _ = path, request
-    return JSONResponse(
-        status_code=503,
-        content={
-            'ok': False,
-            'mode': 'FAIL_CLOSED_BOOTSTRAP',
-            'startup_status': STARTUP_STATUS,
-            'startup_error_type': STARTUP_ERROR_TYPE,
-            'trading_enabled': False,
-        },
-    )
+    return JSONResponse(status_code=503, content={
+        'ok': False,
+        'mode': 'FAIL_CLOSED_BOOTSTRAP',
+        'startup_status': STARTUP_STATUS,
+        'startup_error_type': STARTUP_ERROR_TYPE,
+        'resolved_port': PORT,
+    })
 
 
 class DynamicProductionApp:
-    """ASGI switch: bootstrap owns lifespan; HTTP/WebSocket move to production when ready."""
-
     async def __call__(self, scope, receive, send):
         if scope['type'] == 'lifespan':
             await bootstrap(scope, receive, send)
@@ -171,5 +149,5 @@ app = DynamicProductionApp()
 
 
 if __name__ == '__main__':
-    LOG.info('bootstrap binding host=0.0.0.0 port=%s health=/healthz readiness=/readyz', PORT)
-    uvicorn.run(app, host='0.0.0.0', port=PORT)
+    LOG.info('uvicorn bind requested host=0.0.0.0 port=%s WEB_PORT=%r PORT=%r', PORT, os.getenv('WEB_PORT'), os.getenv('PORT'))
+    uvicorn.run(app, host='0.0.0.0', port=PORT, access_log=True, log_level='info')
