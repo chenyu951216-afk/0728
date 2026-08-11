@@ -41,13 +41,7 @@ STARTUP_STATUS = 'BOOTING'
 
 
 async def _load_production() -> None:
-    """Load the heavyweight runtime only after the bootstrap server has bound its port.
-
-    Import is sent to a worker thread so SQLite migrations/provenance recovery cannot
-    block the ASGI event loop. Once imported, enter the production FastAPI lifespan in
-    the main event loop so all existing startup/background workers still run exactly
-    as they would when uvicorn hosted the production app directly.
-    """
+    """Load the heavyweight runtime only after the bootstrap server has bound its port."""
     global PRODUCTION_APP, PRODUCTION_MODULE, PRODUCTION_LIFESPAN
     global STARTUP_ERROR_TYPE, STARTUP_ERROR_TEXT, STARTUP_STATUS
     STARTUP_STATUS = 'LOADING_PRODUCTION_RUNTIME'
@@ -74,8 +68,6 @@ async def _load_production() -> None:
 @asynccontextmanager
 async def _bootstrap_lifespan(_: FastAPI):
     global PRODUCTION_LOAD_TASK, PRODUCTION_LIFESPAN, STARTUP_STATUS
-    # Schedule, do not await: yielding immediately is what lets uvicorn finish startup
-    # and expose the HTTP port before the heavyweight research runtime is ready.
     PRODUCTION_LOAD_TASK = asyncio.create_task(_load_production(), name='load-production-runtime')
     yield
 
@@ -95,22 +87,49 @@ async def _bootstrap_lifespan(_: FastAPI):
 
 bootstrap = FastAPI(
     title='ETH Adaptive AI bootstrap',
-    version='9.0.2-bootstrap',
+    version='9.0.3-bootstrap',
     lifespan=_bootstrap_lifespan,
 )
 
 
 @bootstrap.get('/healthz')
 def healthz() -> JSONResponse:
+    """Liveness only.
+
+    Zeabur/public proxies must see HTTP 200 as soon as the web process has bound the
+    port. Research/certification readiness is deliberately reported separately by
+    /readyz so a long SQLite/model preflight can never make an otherwise-live service
+    disappear behind a gateway 502.
+    """
+    ready = PRODUCTION_APP is not None
+    return JSONResponse(
+        status_code=200,
+        content={
+            'ok': True,
+            'alive': True,
+            'ready': ready,
+            'mode': 'PRODUCTION' if ready else 'FAIL_CLOSED_BOOTSTRAP',
+            'startup_status': STARTUP_STATUS,
+            'startup_error_type': STARTUP_ERROR_TYPE,
+            'trading_enabled': ready,
+            'port': PORT,
+        },
+    )
+
+
+@bootstrap.get('/readyz')
+def readyz() -> JSONResponse:
+    """Readiness for the heavyweight production runtime, not process liveness."""
     ready = PRODUCTION_APP is not None
     return JSONResponse(
         status_code=200 if ready else 503,
         content={
             'ok': ready,
-            'mode': 'PRODUCTION' if ready else 'FAIL_CLOSED_BOOTSTRAP',
+            'ready': ready,
             'startup_status': STARTUP_STATUS,
             'startup_error_type': STARTUP_ERROR_TYPE,
             'trading_enabled': ready,
+            'port': PORT,
         },
     )
 
@@ -119,7 +138,7 @@ def healthz() -> JSONResponse:
 def bootstrap_dashboard() -> str:
     status = STARTUP_STATUS
     err = STARTUP_ERROR_TEXT or '—'
-    return f'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ETH Adaptive AI</title><style>body{{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#071426;color:#e8f0ff;margin:0;padding:28px}}.card{{max-width:760px;margin:40px auto;padding:24px;border:1px solid #29466d;border-radius:20px;background:#0b1b31}}h1{{margin-top:0}}.warn{{color:#ffd36e}}.bad{{color:#ff7187}}code{{word-break:break-word}}</style></head><body><div class="card"><h1>ETH Adaptive AI 9.0.2</h1><h2 class="{'bad' if STARTUP_ERROR_TYPE else 'warn'}">HTTP 已啟動 · 正式 Runtime {status}</h2><p>Zeabur Port 已先完成監聽。正式研究、認證與交易 Runtime 正在背景初始化；完成前所有新訊號與交易皆 fail-closed。</p><p>錯誤：<code>{err}</code></p><p>既有 SQLite / Volume 不會因 bootstrap 被清除。</p></div></body></html>'''
+    return f'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ETH Adaptive AI</title><style>body{{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#071426;color:#e8f0ff;margin:0;padding:28px}}.card{{max-width:760px;margin:40px auto;padding:24px;border:1px solid #29466d;border-radius:20px;background:#0b1b31}}h1{{margin-top:0}}.warn{{color:#ffd36e}}.bad{{color:#ff7187}}code{{word-break:break-word}}</style></head><body><div class="card"><h1>ETH Adaptive AI 9.0.3</h1><h2 class="{'bad' if STARTUP_ERROR_TYPE else 'warn'}">HTTP 已啟動 · 正式 Runtime {status}</h2><p>Zeabur Port 已先完成監聽。正式研究、認證與交易 Runtime 正在背景初始化；完成前所有新訊號與交易皆 fail-closed。</p><p>監聽 Port：<code>{PORT}</code></p><p>錯誤：<code>{err}</code></p><p>既有 SQLite / Volume 不會因 bootstrap 被清除。</p></div></body></html>'''
 
 
 @bootstrap.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'])
@@ -152,4 +171,5 @@ app = DynamicProductionApp()
 
 
 if __name__ == '__main__':
+    LOG.info('bootstrap binding host=0.0.0.0 port=%s health=/healthz readiness=/readyz', PORT)
     uvicorn.run(app, host='0.0.0.0', port=PORT)
