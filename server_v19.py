@@ -16,16 +16,16 @@ from v18_operational_guard import install as install_operational_guard
 LOG = logging.getLogger('eth-adaptive.startup')
 core = base.core
 
-# Install every final safety/learning layer first, but DO NOT perform heavyweight
-# cross-version provenance work synchronously during module import. Zeabur must be
-# able to bind its HTTP port even when a large persistent DB needs recovery/audit.
+# Install every final safety/learning layer first. server_entry.py now binds Zeabur's
+# HTTP port before importing this module, so even a slow persistent-DB initialization
+# cannot become an opaque 502.
 install_final_system(core)
 install_operational_guard(core)
 
-RUNTIME_VERSION = '9.0.1-20260811'
+RUNTIME_VERSION = '9.0.2-20260811'
 core.state['runtime_version'] = RUNTIME_VERSION
 core.state.setdefault('strict_replay', {})['runtime'] = RUNTIME_VERSION
-core.app.version = '9.0.1'
+core.app.version = '9.0.2'
 
 app = core.app
 PORT = core.PORT
@@ -34,8 +34,7 @@ _PREFLIGHT_READY = threading.Event()
 _PREFLIGHT_FAILED = threading.Event()
 
 # Keep certification and live order creation fail-closed until the persistent source
-# contract has been recovered/audited. The web server itself is intentionally allowed
-# to start so a data/audit problem can never turn into an opaque 502 again.
+# contract has been recovered/audited. HTTP is already available through server_entry.
 _original_certify = operational_guard.certify_and_execute
 _original_live_gate = operational_guard.final_live_gate
 
@@ -64,8 +63,6 @@ def _live_after_preflight(core_obj, original_create, analysis, m15):
     return _original_live_gate(core_obj, original_create, analysis, m15)
 
 
-# Lambdas/closures installed by v18 resolve operational_guard.certify_and_execute at
-# call time. Rebinding this module name therefore gates legacy/manual paths too.
 operational_guard.certify_and_execute = _certify_after_preflight
 operational_guard.final_live_gate = _live_after_preflight
 final_system.certify_and_execute = _certify_after_preflight
@@ -85,7 +82,7 @@ def _preflight_worker() -> None:
             'completed_at': int(time.time()), 'result': result,
         }
         _PREFLIGHT_READY.set()
-        LOG.info('9.0.1 startup provenance preflight complete: %s', result.get('status'))
+        LOG.info('9.0.2 startup provenance preflight complete: %s', result.get('status'))
     except Exception as exc:
         _PREFLIGHT_FAILED.set()
         core.state['startup_preflight'] = {
@@ -93,11 +90,9 @@ def _preflight_worker() -> None:
             'failed_at': int(time.time()), 'error': f'{type(exc).__name__}: {exc}',
             'reason': 'web remains online; certification and new orders remain fail-closed until this is repaired',
         }
-        LOG.exception('9.0.1 startup provenance preflight failed')
+        LOG.exception('9.0.2 startup provenance preflight failed')
 
 
-# Start only after all gates are installed. Daemonization means the import path is
-# never held hostage by a large SQLite audit/reset before uvicorn can bind the port.
 threading.Thread(target=_preflight_worker, name='source-provenance-preflight', daemon=True).start()
 
 app.router.routes = [route for route in app.router.routes if getattr(route, 'path', None) != '/']
@@ -106,8 +101,8 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 @app.get('/', response_class=HTMLResponse)
 def dashboard() -> str:
     html = base.dashboard()
-    html = html.replace('ETH Adaptive AI 8.4.1 Certification Orchestrator', 'ETH Adaptive AI 9.0.1 Startup Integrity')
-    html = html.replace('ETH Adaptive AI 8.4', 'ETH Adaptive AI 9.0.1')
+    html = html.replace('ETH Adaptive AI 8.4.1 Certification Orchestrator', 'ETH Adaptive AI 9.0.2 Startup Integrity')
+    html = html.replace('ETH Adaptive AI 8.4', 'ETH Adaptive AI 9.0.2')
     startup_card = '''
 <section class="card"><h2>🛡️ Startup / Final Authority Gate</h2>
 <div id="startup19" class="notice">讀取啟動稽核狀態…</div>
