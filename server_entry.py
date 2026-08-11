@@ -18,20 +18,14 @@ logging.basicConfig(level=os.getenv('LOG_LEVEL', 'INFO'), format='%(asctime)s %(
 
 
 def _resolve_port() -> int:
-    """Resolve Zeabur's externally published port safely.
-
-    Prefer WEB_PORT when the platform injects it. A manually configured PORT must not
-    override the platform-selected public port, otherwise the container can look
-    healthy internally while Zeabur's proxy reaches the wrong socket and returns 502.
-    """
-    for raw in (os.getenv('WEB_PORT', ''), os.getenv('PORT', ''), '8080'):
-        try:
-            value = int(str(raw).strip())
-            if 1 <= value <= 65535:
-                os.environ['PORT'] = str(value)
-                return value
-        except (TypeError, ValueError):
-            continue
+    """Use the single Git-service port exposed by Dockerfile/Zeabur."""
+    raw = os.getenv('PORT', '8080')
+    try:
+        value = int(str(raw).strip())
+        if 1 <= value <= 65535:
+            return value
+    except (TypeError, ValueError):
+        pass
     os.environ['PORT'] = '8080'
     return 8080
 
@@ -72,8 +66,8 @@ async def _load_production() -> None:
 @asynccontextmanager
 async def _bootstrap_lifespan(_: FastAPI):
     LOG.info(
-        'bootstrap starting pid=%s thread=%s host=0.0.0.0 resolved_port=%s WEB_PORT=%r PORT=%r',
-        os.getpid(), threading.current_thread().name, PORT, os.getenv('WEB_PORT'), os.getenv('PORT'),
+        'BOOTSTRAP_BIND pid=%s thread=%s host=0.0.0.0 port=%s PORT_ENV=%r',
+        os.getpid(), threading.current_thread().name, PORT, os.getenv('PORT'),
     )
     task = asyncio.create_task(_load_production(), name='load-production-runtime')
     yield
@@ -97,12 +91,10 @@ bootstrap = FastAPI(title='ETH Adaptive AI bootstrap', version='9.0.4-bootstrap'
 def healthz() -> JSONResponse:
     return JSONResponse(status_code=200, content={
         'ok': True,
-        'liveness': True,
+        'alive': True,
         'startup_status': STARTUP_STATUS,
         'startup_error_type': STARTUP_ERROR_TYPE,
-        'resolved_port': PORT,
-        'web_port_env': os.getenv('WEB_PORT'),
-        'port_env': os.getenv('PORT'),
+        'port': PORT,
     })
 
 
@@ -114,14 +106,14 @@ def readyz() -> JSONResponse:
         'ready': ready,
         'startup_status': STARTUP_STATUS,
         'startup_error_type': STARTUP_ERROR_TYPE,
-        'resolved_port': PORT,
+        'port': PORT,
     })
 
 
 @bootstrap.get('/', response_class=HTMLResponse)
 def bootstrap_dashboard() -> str:
     err = STARTUP_ERROR_TEXT or '—'
-    return f'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ETH Adaptive AI</title><style>body{{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#071426;color:#e8f0ff;margin:0;padding:28px}}.card{{max-width:760px;margin:40px auto;padding:24px;border:1px solid #29466d;border-radius:20px;background:#0b1b31}}h1{{margin-top:0}}.warn{{color:#ffd36e}}.bad{{color:#ff7187}}code{{word-break:break-word}}</style></head><body><div class="card"><h1>ETH Adaptive AI 9.0.4</h1><h2 class="{'bad' if STARTUP_ERROR_TYPE else 'warn'}">Bootstrap HTTP ONLINE · {STARTUP_STATUS}</h2><p>Resolved port: <code>{PORT}</code></p><p>WEB_PORT env: <code>{os.getenv('WEB_PORT') or '—'}</code></p><p>PORT env: <code>{os.getenv('PORT') or '—'}</code></p><p>正式 Runtime 完成前，新訊號與交易維持 fail-closed。</p><p>錯誤：<code>{err}</code></p></div></body></html>'''
+    return f'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ETH Adaptive AI</title><style>body{{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#071426;color:#e8f0ff;margin:0;padding:28px}}.card{{max-width:760px;margin:40px auto;padding:24px;border:1px solid #29466d;border-radius:20px;background:#0b1b31}}h1{{margin-top:0}}.warn{{color:#ffd36e}}.bad{{color:#ff7187}}code{{word-break:break-word}}</style></head><body><div class="card"><h1>ETH Adaptive AI 9.0.4</h1><h2 class="{'bad' if STARTUP_ERROR_TYPE else 'warn'}">Bootstrap HTTP ONLINE · {STARTUP_STATUS}</h2><p>Listening: <code>0.0.0.0:{PORT}</code></p><p>正式 Runtime 完成前，新訊號與交易維持 fail-closed。</p><p>錯誤：<code>{err}</code></p></div></body></html>'''
 
 
 @bootstrap.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'])
@@ -132,7 +124,7 @@ async def bootstrap_fallback(path: str, request: Request) -> JSONResponse:
         'mode': 'FAIL_CLOSED_BOOTSTRAP',
         'startup_status': STARTUP_STATUS,
         'startup_error_type': STARTUP_ERROR_TYPE,
-        'resolved_port': PORT,
+        'port': PORT,
     })
 
 
@@ -149,5 +141,5 @@ app = DynamicProductionApp()
 
 
 if __name__ == '__main__':
-    LOG.info('uvicorn bind requested host=0.0.0.0 port=%s WEB_PORT=%r PORT=%r', PORT, os.getenv('WEB_PORT'), os.getenv('PORT'))
+    LOG.info('UVICORN_BIND host=0.0.0.0 port=%s', PORT)
     uvicorn.run(app, host='0.0.0.0', port=PORT, access_log=True, log_level='info')
