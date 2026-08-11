@@ -50,12 +50,12 @@ jobs:
           fi
           grep -q '9.0.1' /tmp/dashboard.html
 
-      - name: Validate live production process and port
+      - name: Validate live production process and resolved port
         run: |
           test "$(docker inspect -f '{{.State.Running}}' eth-adaptive-ci-run)" = "true"
-          docker exec eth-adaptive-ci-run sh -c 'test "$PORT" = "18080"'
           curl -fsS http://127.0.0.1:18080/openapi.json >/tmp/openapi.json
           grep -q '9.0.1' /tmp/openapi.json
+          docker logs eth-adaptive-ci-run 2>&1 | grep -q 'Uvicorn running on http://0.0.0.0:18080'
 
       - name: Show logs
         if: always()
