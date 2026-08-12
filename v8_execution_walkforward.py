@@ -11,8 +11,8 @@ import adaptive_v5 as signal
 import execution_v7 as execution
 import v8_evolution
 
-WALKFORWARD_VERSION = '7.2.0-20260809'
-WALKFORWARD_SCHEMA = 1
+WALKFORWARD_VERSION = '10.1.0-20260813'
+WALKFORWARD_SCHEMA = 2
 MIN_WF_OPPORTUNITIES = max(110, int(os.getenv('EXECUTION_WF_MIN_OPPORTUNITIES', '126')))
 MIN_WF_FOLDS = max(3, int(os.getenv('EXECUTION_WF_MIN_FOLDS', '3')))
 MIN_FOLD_AUDIT_FILLS = max(6, int(os.getenv('EXECUTION_WF_MIN_FOLD_FILLS', '8')))
@@ -214,8 +214,8 @@ def optimize_pair_walkforward(core: Any, strategy: str, direction: str, force: b
     core_ok = bool(
         len(qualified_folds) >= MIN_WF_FOLDS
         and int(aggregate['fills']) >= execution.MIN_AUDIT_FILLS
-        and float(aggregate['profit_factor']) >= 1.20
-        and float(aggregate['expectancy_r']) >= .08
+        and float(aggregate['profit_factor']) >= execution.MIN_AUDIT_PF
+        and float(aggregate['expectancy_r']) >= execution.MIN_AUDIT_EV_R
         and shrunk_ev >= .04
         and ci_low > 0.0
         and float(aggregate['max_drawdown_r']) <= 10.0
@@ -250,6 +250,8 @@ def optimize_pair_walkforward(core: Any, strategy: str, direction: str, force: b
         'mean_inner_validation_ev_r': mean_val_ev, 'mean_inner_validation_pf': mean_val_pf,
         'suspicious_metrics': suspicious, 'blocked_regimes': blocked_regimes, 'regime_metrics': regime_metrics,
         'estimated_all_in_cost_bps': execution.ALL_IN_COST_BPS,
+        'minimum_audit_profit_factor': execution.MIN_AUDIT_PF,
+        'minimum_audit_expectancy_r': execution.MIN_AUDIT_EV_R,
         'policy_stability_top_share': max(policy_votes.values()) / max(len(chosen_policies), 1),
         'deployment_selection': {'development': deployment_dev, 'validation': deployment_val},
         'reason': (

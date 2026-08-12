@@ -17,14 +17,16 @@ import adaptive_v5 as base
 import v5_runtime
 import v8_evolution as evo
 
-VERSION = '10.0.0-20260812'
-GENOME_SCHEMA = 4
+VERSION = '10.1.0-20260813'
+GENOME_SCHEMA = 5
 GENERATIONS = max(3, min(12, int(os.getenv('SIGNAL_EVOLUTION_GENERATIONS', '7'))))
 POPULATION = max(16, min(96, int(os.getenv('SIGNAL_EVOLUTION_POPULATION', '36'))))
 ELITES = max(3, min(16, int(os.getenv('SIGNAL_EVOLUTION_ELITES', '6'))))
 FINAL_HOLDOUT_PCT = max(.15, min(.30, float(os.getenv('SIGNAL_FINAL_HOLDOUT_PCT', '.20'))))
 MIN_HOLDOUT_SELECTED = max(60, int(os.getenv('SIGNAL_MIN_HOLDOUT_SELECTED', '60')))
 MIN_UNTOUCHED_HOLDOUT = max(240, int(os.getenv('SIGNAL_MIN_UNTOUCHED_HOLDOUT', '320')))
+MIN_OOS_PF = max(1.12, min(2.50, float(os.getenv('SIGNAL_MIN_OOS_PF', '1.25'))))
+MIN_OOS_EV_R = max(.04, min(.50, float(os.getenv('SIGNAL_MIN_OOS_EV_R', '.06'))))
 
 REGIME_SCOPES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ('ALL', tuple(base.REGIMES)),
@@ -537,7 +539,7 @@ class HistoricalEvolutionLearner(evo.GenomeEvolutionLearner):
         span_days = max(1.0, (int(scoped_holdout[-1]['ts']) - int(scoped_holdout[0]['ts'])) / 86400.0)
         freq = len(selected) / span_days
         absolute_guard = bool(
-            len(selected) >= MIN_HOLDOUT_SELECTED and stats['pf'] >= 1.12 and stats['ev'] >= .04 and
+            len(selected) >= MIN_HOLDOUT_SELECTED and stats['pf'] >= MIN_OOS_PF and stats['ev'] >= MIN_OOS_EV_R and
             ci05 > 0 and dd <= 14 and .02 <= freq <= 6 and dev['stability'] >= .72 and
             dev['profitable_folds'] >= .66 and dev['worst_fold_ev'] >= -.06 and brier <= .265
         )
@@ -575,6 +577,7 @@ class HistoricalEvolutionLearner(evo.GenomeEvolutionLearner):
             'profit_factor': stats['pf'], 'expectancy_r': stats['ev'], 'test_win': stats['win'],
             'selected_n': len(selected), 'max_drawdown_r': dd, 'signals_per_day': freq,
             'brier': brier, 'stability': dev['stability'], 'clustered_ev_bootstrap_05': ci05,
+            'minimum_oos_profit_factor': MIN_OOS_PF, 'minimum_oos_expectancy_r': MIN_OOS_EV_R,
             'effective_oos_selected_n': len(selected), 'absolute_guard_passed': absolute_guard,
             'champion_comparison_passed': comparison_passed, 'overfit_guard_passed': absolute_guard,
             'incumbent_same_holdout': incumbent, 'candidate_utility': candidate_utility,
@@ -668,6 +671,8 @@ def install(core: Any) -> None:
         'population': POPULATION, 'elites': ELITES, 'final_holdout_pct': FINAL_HOLDOUT_PCT,
         'minimum_new_untouched_decisions': MIN_UNTOUCHED_HOLDOUT,
         'minimum_selected_holdout_trades': MIN_HOLDOUT_SELECTED,
+        'minimum_oos_profit_factor': MIN_OOS_PF,
+        'minimum_oos_expectancy_r': MIN_OOS_EV_R,
         'fixed_strategy_direction_pairs_are_population_entrypoints': True,
         'hierarchical_search_order': ['MACRO_REGIME', 'MARKET_STRUCTURE', 'SHORT_HORIZON_SIGNAL'],
         'macro_and_structure_are_frozen_before_sealed_holdout': True,

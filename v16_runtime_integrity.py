@@ -18,8 +18,8 @@ import v12_clean_baseline
 import v15_data_resilience as resilience
 
 
-VERSION = '8.4.0-20260810'
-REPLAY_PROGRESS_SCHEMA = 4
+VERSION = '10.1.0-20260813'
+REPLAY_PROGRESS_SCHEMA = 5
 MAINTENANCE_SECONDS = 15 * 60
 
 
@@ -74,26 +74,77 @@ def _legal_frontier(core: Any) -> dict[str, Any]:
 
 
 def replay_progress(core: Any) -> dict[str, Any]:
+    collection_gate = getattr(core, 'price_collection_gate', None)
+    full_collection_enforced = callable(collection_gate)
+    if full_collection_enforced:
+        collection = dict(collection_gate() or {})
+        if not collection.get('ready'):
+            return {
+                'cursor_ts': int(core.get_state(v5_runtime.REPLAY_STATE_KEY, core.START_TS) or core.START_TS),
+                'latest_market_ts': None, 'legal_frontier_ts': None, 'latest_5m_ts': None,
+                'percent': 0.0, 'complete': False, 'pending_eligible_decisions': None,
+                'processed_decisions': 0, 'total_eligible_decisions': None,
+                'learned_decisions': 0, 'remaining_to_legal_frontier_seconds': None,
+                'expected_label_maturity_buffer_seconds': 8 * 3600,
+                'completion_basis': 'FULL_HISTORY_COLLECTION_THEN_CAUSAL_DECISION_COUNT',
+                'frontier_reason': None, 'schema': REPLAY_PROGRESS_SCHEMA,
+                'status': 'WAITING_FOR_FULL_HISTORY',
+                'reason': 'all required 1D/4H/1H/30M/15M/5M history must meet the frozen coverage contract before the first replay decision',
+                'price_collection_percent': float(collection.get('percent') or 0.0),
+                'price_collection_blockers': list(collection.get('blockers') or []),
+            }
     frontier = _legal_frontier(core)
     cursor = int(core.get_state(v5_runtime.REPLAY_STATE_KEY, core.START_TS) or core.START_TS)
     legal = int(frontier.get('legal_frontier_ts') or core.START_TS)
     latest = int(frontier.get('latest_market_ts') or time.time())
     start = int(core.START_TS)
+    learned_decisions = 0
+    con = core.db()
+    try:
+        expected_group = len(v5_runtime.STRATEGIES) * len(v5_runtime.DIRECTIONS)
+        learned_decisions = int(con.execute(
+            '''SELECT COUNT(*) FROM (
+                   SELECT ts FROM learning_samples
+                   GROUP BY ts HAVING COUNT(*)=?
+               )''', (expected_group,),
+        ).fetchone()[0] or 0)
+    except Exception:
+        learned_decisions = 0
+    finally:
+        con.close()
+
+    processed = total = None
     if not frontier.get('ready') or legal <= start:
         pct = 0.0
         complete = False
         pending = None
     else:
-        effective_cursor = min(max(cursor, start), legal)
-        pct = 100.0 * max(0, effective_cursor - start) / max(1, legal - start)
-        complete = cursor >= legal
         m15 = resilience.canonical_bars(core, 'ETH', '15m')
         ts15 = [int(x['ts']) for x in m15]
-        start_i = max(100, bisect.bisect_right(ts15, cursor))
         end_i = int(frontier['legal_frontier_index'])
         stride = int(frontier.get('stride_bars') or 2)
-        first = start_i + ((-start_i) % stride)
-        pending = 0 if first > end_i else 1 + (end_i - first) // stride
+        # Count causal decision slots, not wall-clock distance from 2020. This makes
+        # a recent-only replay incapable of displaying 99% merely because its cursor
+        # timestamp happens to be near the live edge.
+        first_i = 100
+        if full_collection_enforced:
+            required_closes: list[int] = []
+            for asset, tf, need in (('ETH', '1d', 80), ('ETH', '4h', 100), ('ETH', '1h', 100), ('BTC', '1h', 50)):
+                rows = resilience.canonical_bars(core, asset, tf)
+                if len(rows) < need:
+                    first_i = end_i + 1
+                    break
+                required_closes.append(int(rows[need - 1]['ts']) + int(core.TIMEFRAME_SECONDS[tf]))
+            if required_closes and first_i <= end_i:
+                first_open = max(required_closes) - int(core.TIMEFRAME_SECONDS['15m'])
+                first_i = max(first_i, bisect.bisect_left(ts15, first_open))
+        first_i += (-first_i) % stride
+        total = 0 if first_i > end_i else 1 + (end_i - first_i) // stride
+        cursor_i = bisect.bisect_right(ts15, min(cursor, legal)) - 1
+        processed = 0 if cursor_i < first_i else min(total, 1 + (cursor_i - first_i) // stride)
+        pending = max(0, total - processed)
+        complete = bool(total > 0 and cursor >= legal and pending == 0)
+        pct = 100.0 if complete else 100.0 * processed / max(total, 1)
     return {
         'cursor_ts': cursor,
         'latest_market_ts': latest,
@@ -102,11 +153,18 @@ def replay_progress(core: Any) -> dict[str, Any]:
         'percent': round(100.0 if complete else min(100.0, pct), 2),
         'complete': bool(complete),
         'pending_eligible_decisions': pending,
+        'processed_decisions': processed,
+        'total_eligible_decisions': total,
+        'learned_decisions': learned_decisions,
         'remaining_to_legal_frontier_seconds': max(0, legal - cursor) if frontier.get('ready') else None,
         'expected_label_maturity_buffer_seconds': max(0, latest - legal) if frontier.get('ready') else None,
-        'completion_basis': 'LATEST_LEGALLY_LABELABLE_DECISION_NOT_LIVE_EDGE',
+        'completion_basis': (
+            'FULL_HISTORY_COLLECTION_THEN_CAUSAL_DECISION_COUNT'
+            if full_collection_enforced else 'LATEST_LEGALLY_LABELABLE_DECISION_NOT_LIVE_EDGE'
+        ),
         'frontier_reason': frontier.get('reason'),
         'schema': REPLAY_PROGRESS_SCHEMA,
+        'status': 'COMPLETE' if complete else 'STRICT_REPLAY_ADVANCING',
     }
 
 

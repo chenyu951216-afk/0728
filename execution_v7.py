@@ -26,6 +26,8 @@ MIN_STOP_PCT = float(os.getenv('EXECUTION_MIN_STOP_PCT', '0.0020'))
 MIN_STOP_COST_MULTIPLE = max(3.0, float(os.getenv('EXECUTION_MIN_STOP_COST_MULTIPLE', '5.0')))
 MAX_HOLD_BARS = max(12, int(os.getenv('EXECUTION_MAX_HOLD_BARS', '32')))
 MIN_AUDIT_FILLS = max(40, int(os.getenv('EXECUTION_MIN_AUDIT_FILLS', '50')))
+MIN_AUDIT_PF = max(1.20, min(3.0, float(os.getenv('EXECUTION_MIN_AUDIT_PF', '1.30'))))
+MIN_AUDIT_EV_R = max(.08, min(.75, float(os.getenv('EXECUTION_MIN_AUDIT_EV_R', '.10'))))
 
 
 class ExecutionStore:
@@ -395,10 +397,10 @@ def optimize_pair(core: Any, strategy: str, direction: str, force: bool = False)
         rr = [simulate_policy(data, x, strategy, direction, policy) for x in audit if x['regime'] == rg]; rs = _stats(rr); regime_metrics[rg] = rs
         if rs['fills'] >= 12 and (rs['expectancy_r'] <= 0 or rs['profit_factor'] < 1.0):
             blocked_regimes.append(rg)
-    core_ok = bool(audit_meta['fills'] >= MIN_AUDIT_FILLS and audit_meta['profit_factor'] >= 1.20 and audit_meta['expectancy_r'] >= .08 and shrunk_ev >= .04 and ci_low > 0.0 and audit_meta['max_drawdown_r'] <= 10.0 and .15 <= audit_meta['fill_rate'] <= .95 and val_meta['fills'] >= 28 and val_meta['profit_factor'] >= 1.05 and val_meta['expectancy_r'] > .02 and dev_meta.get('worst_segment_ev_r', -9) >= -.08 and dev_meta.get('profitable_segment_ratio', 0) >= .66 and audit_meta['avg_stop_pct'] >= MIN_STOP_PCT * .95 and not suspicious)
+    core_ok = bool(audit_meta['fills'] >= MIN_AUDIT_FILLS and audit_meta['profit_factor'] >= MIN_AUDIT_PF and audit_meta['expectancy_r'] >= MIN_AUDIT_EV_R and shrunk_ev >= .04 and ci_low > 0.0 and audit_meta['max_drawdown_r'] <= 10.0 and .15 <= audit_meta['fill_rate'] <= .95 and val_meta['fills'] >= 28 and val_meta['profit_factor'] >= 1.05 and val_meta['expectancy_r'] > .02 and dev_meta.get('worst_segment_ev_r', -9) >= -.08 and dev_meta.get('profitable_segment_ratio', 0) >= .66 and audit_meta['avg_stop_pct'] >= MIN_STOP_PCT * .95 and not suspicious)
     metrics = {
         'schema': EXECUTION_SCHEMA, 'validation_method': 'POINT_IN_TIME_SIGNAL_OOF -> DEV_TUNE -> CHRONO_VALIDATION -> UNTOUCHED_AUDIT', 'strategy': strategy, 'direction': direction, 'model_version': model_version, 'certified': core_ok, 'signal_oof_opportunities': n,
-        'development': dev_meta, 'validation': val_meta, 'audit': audit_meta, 'profit_factor': audit_meta['profit_factor'], 'expectancy_r': audit_meta['expectancy_r'], 'win_rate': audit_meta['win_rate'], 'max_drawdown_r': audit_meta['max_drawdown_r'], 'fill_rate': audit_meta['fill_rate'], 'oos_fills': audit_meta['fills'], 'oos_opportunities': audit_meta['opportunities'], 'ev_bootstrap_05': ci_low, 'ev_bootstrap_95': ci_high, 'shrunk_ev_r': shrunk_ev, 'suspicious_metrics': suspicious, 'blocked_regimes': blocked_regimes, 'regime_metrics': regime_metrics, 'estimated_all_in_cost_bps': ALL_IN_COST_BPS,
+        'development': dev_meta, 'validation': val_meta, 'audit': audit_meta, 'profit_factor': audit_meta['profit_factor'], 'expectancy_r': audit_meta['expectancy_r'], 'win_rate': audit_meta['win_rate'], 'max_drawdown_r': audit_meta['max_drawdown_r'], 'fill_rate': audit_meta['fill_rate'], 'oos_fills': audit_meta['fills'], 'oos_opportunities': audit_meta['opportunities'], 'ev_bootstrap_05': ci_low, 'ev_bootstrap_95': ci_high, 'shrunk_ev_r': shrunk_ev, 'suspicious_metrics': suspicious, 'blocked_regimes': blocked_regimes, 'regime_metrics': regime_metrics, 'estimated_all_in_cost_bps': ALL_IN_COST_BPS, 'minimum_audit_profit_factor': MIN_AUDIT_PF, 'minimum_audit_expectancy_r': MIN_AUDIT_EV_R,
         'reason': 'point-in-time signal OOF + exact execution audit passed' if core_ok else f"rejected v7 execution: PF={audit_meta['profit_factor']:.2f}, EV={audit_meta['expectancy_r']:.3f}R, CI05={ci_low:.3f}R, fills={audit_meta['fills']}, fill={audit_meta['fill_rate']:.0%}, DD={audit_meta['max_drawdown_r']:.1f}R, valEV={val_meta['expectancy_r']:.3f}R, suspicious={suspicious}",
     }
     con = core.db(); store = ExecutionStore(con); version = store.save(strategy, direction, model_version, policy, metrics, core_ok); con.close()
