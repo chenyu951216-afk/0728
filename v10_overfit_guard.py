@@ -6,9 +6,10 @@ from typing import Any
 
 import adaptive_v5 as base
 import v8_evolution as evo
+import runtime_identity
 
 
-VERSION='8.1.0-20260809'
+VERSION=runtime_identity.RUNTIME_VERSION
 CLUSTER_SECONDS=8*3600
 MIN_EFFECTIVE_OOS=60
 MIN_FOLDS=3

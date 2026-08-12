@@ -7,10 +7,11 @@ from typing import Any, Awaitable, Callable
 
 import execution_v7
 import v5_runtime
+import runtime_identity
 import v7_trade_monitor as trade_monitor
 
 
-STABILITY_VERSION = '8.0.1-20260809'
+STABILITY_VERSION = runtime_identity.RUNTIME_VERSION
 SCAN_RETRIES = 2
 SCAN_STALE_SECONDS = 180
 SCAN_DEGRADE_AFTER = 3
@@ -211,7 +212,7 @@ def install(core: Any) -> None:
     execution_v7.optimize_all = stable_optimize_all
     core.scan_worker = stable_live_worker
     core.state['runtime_version'] = STABILITY_VERSION
-    core.app.version = '8.0.1'
+    runtime_identity.stamp(core)
     core.state['stability_mode'] = 'SUBSYSTEM_ISOLATED_FAIL_CLOSED'
     core.state['subsystem_health'] = {
         'market_scan': _health(core, 'market_scan'),

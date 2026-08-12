@@ -10,8 +10,9 @@ import v12_clean_baseline
 import v13_replay_cursor_integrity as cursor_guard
 import v15_data_resilience as resilience
 import v16_runtime_integrity as runtime_integrity
+import runtime_identity
 
-VERSION = '8.4.1-20260810'
+VERSION = runtime_identity.RUNTIME_VERSION
 AUDIT_SCHEMA = 1
 STATE_KEY = 'v17_certification_state'
 AUDIT_KEY = 'v17_derived_dataset_audit'
@@ -161,7 +162,7 @@ def audit_derived_dataset(core: Any, *, allow_auto_rebuild: bool = True) -> dict
     previous = core.get_state(AUDIT_KEY, None)
     already_reset = bool(isinstance(previous, dict) and previous.get('auto_rebuild_applied_for_dataset') == baseline.get('dataset_id'))
     if result.get('hard_failure') and allow_auto_rebuild and not already_reset and baseline.get('clean') is True:
-        cursor_guard._reset_derived_replay(core, '8.4.1 derived-data audit failed: ' + str(result.get('reason') or 'unknown'))
+        cursor_guard._reset_derived_replay(core, f'{VERSION} derived-data audit failed: ' + str(result.get('reason') or 'unknown'))
         result['status'] = 'AUTO_REBUILDING_DERIVED_ONLY'
         result['valid'] = False
         result['auto_rebuild_applied'] = True
@@ -408,7 +409,7 @@ def install(core: Any) -> None:
         'recertification_seconds': RECERTIFY_SECONDS,
     }
     core.state['runtime_version'] = VERSION
-    core.app.version = '8.4.1'
+    runtime_identity.stamp(core)
 
     if not any(getattr(r, 'path', None) == '/api/v17/certification' for r in core.app.router.routes):
         @core.app.get('/api/v17/certification')

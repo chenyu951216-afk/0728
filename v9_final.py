@@ -17,9 +17,10 @@ import v7_runtime
 import v7_timesafe_learning
 import v8_evolution
 import v8_execution_walkforward as wf
+import runtime_identity
 
 
-FINAL_VERSION = '8.0.0-20260809'
+FINAL_VERSION = runtime_identity.RUNTIME_VERSION
 STRICT_SCHEMA = 5
 STRICT_REPLAY_SCHEMA = 1
 DERIVATIVE_SAFETY_LAG_SECONDS = max(0, int(os.getenv('STRICT_DERIVATIVE_SAFETY_LAG_SECONDS', '14400')))
@@ -493,7 +494,7 @@ async def final_boot_notice(core: Any) -> None:
     import v5_runtime as vr
     ok = await vr.robust_send_discord(
         core,
-        '🛡️ ETH Adaptive AI 8.0 Strict Replay 已啟動',
+        f'🛡️ {runtime_identity.PRODUCT_NAME} {runtime_identity.DISPLAY_VERSION} Strict Replay 已啟動',
         '歷史模擬規則已鎖死：時間 T 的 Signal / Entry / SL / TP 只能使用 T 當下已收線且已可取得的資料。30m/1H/4H/1D 未收線 K 棒禁止進入決策；歷史衍生品採保守 publication lag；未來價格只在計畫鎖定後依時間順序揭露。\n'
         'Signal label 改為多個預先鎖定 reference plans 的 robust 結果，不再被單一 1.2ATR/1.25R 綁死；每個策略×方向都建立樣本，不再由 hand-written prior 門檻先淘汰。\n'
         'Execution 使用多代 DEV-only evolution；Validation 只在最後 elite 中選擇，outer untouched audit 永遠不能回頭指導 mutation。新單仍只先進 deployment evidence，不能用單筆輸贏直接污染 Signal Model。',
@@ -530,7 +531,7 @@ def install(core: Any) -> None:
         'live_trade_can_directly_mutate_signal_label': False,
     }
     core.state['execution_validation_method'] = 'STRICT_EVENT_TIME -> DEV_ONLY_MULTI_GENERATION_EVOLUTION -> FINAL_VALIDATION_SELECTOR -> NEXT_UNTOUCHED_WALK_FORWARD_AUDIT'
-    core.app.version = '8.0.0'
+    runtime_identity.stamp(core)
     v7_runtime.maybe_boot_notice = final_boot_notice
 
     if not any(getattr(r, 'path', None) == '/api/v9/strict-replay' for r in core.app.router.routes):

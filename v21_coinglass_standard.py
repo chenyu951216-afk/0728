@@ -12,9 +12,10 @@ import v7_runtime
 import v10_final_integrity as final_integrity
 import v13_replay_cursor_integrity as cursor_guard
 import v15_data_resilience as resilience
+import runtime_identity
 
 
-VERSION = '10.0.0-20260812'
+VERSION = runtime_identity.RUNTIME_VERSION
 FEATURE_SCHEMA = 7
 FEATURE_SCHEMA_KEY = 'coinglass_standard_feature_schema'
 STATE_KEY = 'coinglass_standard_v1'

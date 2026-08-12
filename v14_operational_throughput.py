@@ -12,9 +12,10 @@ import execution_v7
 import v5_runtime
 import v9_final
 import v10_final_integrity as final
+import runtime_identity
 
 
-VERSION = '8.2.3-20260810'
+VERSION = runtime_identity.RUNTIME_VERSION
 BUSY_TIMEOUT_MS = max(10000, min(60000, int(os.getenv('SQLITE_BUSY_TIMEOUT_MS', '20000'))))
 REPLAY_BATCH_DECISIONS = max(500, min(4000, int(os.getenv('STRICT_REPLAY_BATCH_DECISIONS', '2000'))))
 DB_WRITE_RETRIES = 5
@@ -277,4 +278,4 @@ def install(core: Any) -> None:
         'writer_fairness_guard': True,
     }
     core.state['runtime_version'] = VERSION
-    core.app.version = '8.2.3'
+    runtime_identity.stamp(core)

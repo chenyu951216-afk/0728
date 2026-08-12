@@ -9,13 +9,14 @@ from datetime import datetime
 from typing import Any
 
 import httpx
+import runtime_identity
 
 from adaptive_v5 import (
     STRATEGIES, DIRECTIONS, Learner, ModelStore, adaptive_entry,
     baseline_direction_scores, build_features, detect_regime, risk_plan, choose_strategy,
 )
 
-V5_VERSION = '5.0.0-20260808'
+V5_VERSION = runtime_identity.RUNTIME_VERSION
 REPLAY_STATE_KEY = 'last_learning_sample_ts_v2'
 
 
@@ -57,21 +58,22 @@ def _replay_progress(core: Any) -> dict[str, Any]:
 
 async def robust_send_discord(core: Any, title: str, body: str, color: int = 6000633) -> bool:
     webhook=os.getenv('DISCORD_WEBHOOK_URL','') or getattr(core,'DISCORD_WEBHOOK_URL',''); bot=os.getenv('DISCORD_BOT_TOKEN','') or getattr(core,'DISCORD_BOT_TOKEN',''); channel=os.getenv('DISCORD_CHANNEL_ID','') or getattr(core,'DISCORD_CHANNEL_ID','')
-    payload={'embeds':[{'title':title[:256],'description':body[:4000],'color':color,'timestamp':datetime.now(core.timezone.utc).isoformat(),'footer':{'text':'ETH Adaptive AI v5 | research/paper only'}}]}; errors=[]
+    title=runtime_identity.public_text(title); body=runtime_identity.public_text(body)
+    payload={'embeds':[{'title':title[:256],'description':body[:4000],'color':color,'timestamp':datetime.now(core.timezone.utc).isoformat(),'footer':{'text':f'{runtime_identity.PRODUCT_NAME} {runtime_identity.RUNTIME_VERSION} | research/paper only'}}]}; errors=[]
     async with httpx.AsyncClient(timeout=15) as client:
         if webhook:
             for attempt in range(3):
                 try:
-                    response=await client.post(webhook,json=payload); response.raise_for_status(); core.state['discord']={'configured':True,'ok':True,'route':'webhook','last_success':datetime.now(core.timezone.utc).isoformat(),'error':None}; return True
+                    response=await client.post(webhook,json=payload); response.raise_for_status(); core.state['discord']={'configured':True,'ok':True,'route':'webhook','last_success':datetime.now(core.timezone.utc).isoformat(),'error':None,'runtime':runtime_identity.RUNTIME_VERSION}; return True
                 except Exception as exc:
                     errors.append(f'webhook#{attempt+1}:{exc}'); await asyncio.sleep(.7*(attempt+1))
         if bot and channel:
             for attempt in range(3):
                 try:
-                    response=await client.post(f'{core.DISCORD_API}/channels/{channel}/messages',headers={'Authorization':f'Bot {bot}'},json=payload); response.raise_for_status(); core.state['discord']={'configured':True,'ok':True,'route':'bot','last_success':datetime.now(core.timezone.utc).isoformat(),'error':None}; return True
+                    response=await client.post(f'{core.DISCORD_API}/channels/{channel}/messages',headers={'Authorization':f'Bot {bot}'},json=payload); response.raise_for_status(); core.state['discord']={'configured':True,'ok':True,'route':'bot','last_success':datetime.now(core.timezone.utc).isoformat(),'error':None,'runtime':runtime_identity.RUNTIME_VERSION}; return True
                 except Exception as exc:
                     errors.append(f'bot#{attempt+1}:{exc}'); await asyncio.sleep(.7*(attempt+1))
-    core.state['discord']={'configured':bool(webhook or (bot and channel)),'ok':False,'route':None,'last_success':None,'error':'; '.join(errors)[-1200:] or 'Discord not configured'}; return False
+    core.state['discord']={'configured':bool(webhook or (bot and channel)),'ok':False,'route':None,'last_success':None,'error':'; '.join(errors)[-1200:] or 'Discord not configured','runtime':runtime_identity.RUNTIME_VERSION}; return False
 
 
 def generate_learning_samples_v5(core: Any, batch: int = 500) -> int:
@@ -136,13 +138,13 @@ async def maybe_daily_report(core: Any) -> None:
     if core.get_state('last_daily_report_v5')==day:return
     champions=_all_champions(core);counts=_sample_counts(core);start=int(datetime(now.year,now.month,now.day,tzinfo=core.TAIPEI).timestamp());con=core.db();trades=con.execute('SELECT status,strategy,direction,realized_r FROM signals WHERE created_at>=?',(start,)).fetchall();con.close();closed=[x for x in trades if x[0]=='CLOSED'];pnl=sum(float(x[3] or 0) for x in closed);lines=[]
     for c in champions[:12]:lines.append(f"• `{c['strategy']} {c['direction']}` v{c['version']}｜PF {float(c.get('profit_factor') or 0):.2f}｜EV {float(c.get('expectancy_r') or 0):+.3f}R｜門檻 {float(c.get('threshold') or 0):.0%}｜約 {float(c.get('signals_per_day') or 0):.2f}/日")
-    total_samples=sum(v for d in counts.values() for v in d.values());replay=_replay_progress(core);body=f"台灣時間 `{now.strftime('%Y-%m-%d %H:%M')}`\n歷史價格覆蓋 `{(core.state.get('learning') or {}).get('progress',{}).get('overall',0):.2f}%`｜v5 策略×方向重播 `{replay['percent']:.2f}%`\n總學習樣本 `{total_samples:,}`｜Champion `{len(champions)}` 個\n今日訊號 `{len(trades)}`｜已結束 `{len(closed)}`｜合計 `{pnl:+.2f}R`\n\n"+("\n".join(lines) if lines else '目前尚無通過 OOS 的 Champion。')
+    total_samples=sum(v for d in counts.values() for v in d.values());replay=_replay_progress(core);body=f"台灣時間 `{now.strftime('%Y-%m-%d %H:%M')}`\n歷史價格覆蓋 `{(core.state.get('learning') or {}).get('progress',{}).get('overall',0):.2f}%`｜因果策略×方向重播 `{replay['percent']:.2f}%`\n總學習樣本 `{total_samples:,}`｜Champion `{len(champions)}` 個\n今日訊號 `{len(trades)}`｜已結束 `{len(closed)}`｜合計 `{pnl:+.2f}R`\n\n"+("\n".join(lines) if lines else '目前尚無通過 OOS 的 Champion。')
     if await robust_send_discord(core,'📊 ETH Adaptive AI 每日 17:00 學習報告',body,0x5865F2):core.set_state('last_daily_report_v5',day)
 
 
 async def maybe_boot_notice(core: Any) -> None:
     if core.get_state('discord_boot_version')==V5_VERSION:return
-    if await robust_send_discord(core,'✅ ETH Adaptive AI v5 已啟動','方向分流學習、nested OOS 門檻、Regime 盈利過濾、Champion/Challenger、歷史重播與 Discord 交易生命週期通知已啟用。\n沒有通過驗證的策略不會硬發交易訊號。',0x3498DB):core.set_state('discord_boot_version',V5_VERSION)
+    if await robust_send_discord(core,f'✅ {runtime_identity.PRODUCT_NAME} {runtime_identity.DISPLAY_VERSION} 已啟動','方向分流學習、nested OOS 門檻、Regime 盈利過濾、Champion/Challenger、歷史重播與 Discord 交易生命週期通知已啟用。\n沒有通過驗證的策略不會硬發交易訊號。',0x3498DB):core.set_state('discord_boot_version',V5_VERSION)
 
 
 async def learning_tick_v5(core: Any) -> None:
@@ -155,7 +157,7 @@ async def learning_tick_v5(core: Any) -> None:
     else:
         core.derivative_history.set_db_path(core.DB_PATH);derivative_result=await core.derivative_history.backfill_tick(core.hub,core.START_TS,pages=max(1,min(5,core.BACKFILL_PAGES_PER_TICK)));samples=generate_learning_samples_v5(core);training=train_v5(core)
         if training:await _notify_promotions(core,training)
-    con=core.db();progress=core.bootstrap_progress(con);con.close();champions=_all_champions(core);counts=_sample_counts(core);replay=_replay_progress(core);core.state['learning']={'progress':progress,'historical_price_coverage':progress.get('overall',0),'replay_learning_progress':replay,'backfill':backfill_result,'derivatives':core.derivative_history.status(),'derivative_backfill':derivative_result,'live_samples_added':live_added,'v5_samples_added':samples,'sample_counts':counts,'champions':champions,'recent_rejected':[x for x in training if not x.get('promoted')][:12],'learning_order':['1D/4H regime','1H/30M structure','15M/5M execution','derivatives','post-exit review'],'model_schema_version':2};await maybe_boot_notice(core);await maybe_daily_report(core)
+    con=core.db();progress=core.bootstrap_progress(con);con.close();champions=_all_champions(core);counts=_sample_counts(core);replay=_replay_progress(core);core.state['learning']={'progress':progress,'historical_price_coverage':progress.get('overall',0),'replay_learning_progress':replay,'backfill':backfill_result,'derivatives':core.derivative_history.status(),'derivative_backfill':derivative_result,'live_samples_added':live_added,'causal_samples_added':samples,'v5_samples_added':samples,'sample_counts':counts,'champions':champions,'recent_rejected':[x for x in training if not x.get('promoted')][:12],'learning_order':['1D/4H regime','1H/30M structure','15M/5M execution','derivatives','post-exit review'],'model_schema_version':2};await maybe_boot_notice(core);await maybe_daily_report(core)
 
 
 def _signal_summary(core: Any, row: dict[str, Any]) -> str:
@@ -214,7 +216,7 @@ async def poll_discord_commands(core: Any) -> None:
         elif content.startswith(('帳戶餘額','账户余额','資金','资金')):
             if price<=0:await _reply_status(core,'請輸入例如：`資金 1000`。');continue
             core.set_state('account_equity_usdt',price);await _reply_status(core,f"帳戶餘額已更新為 `{price:,.2f} USDT`；每筆初始止損風險仍為 `{core.RISK_PER_TRADE:.1%}`。")
-        elif content in ('測試','测试','test','TEST'):await robust_send_discord(core,'✅ Discord 連線測試成功',f'v5 runtime 正常｜{datetime.now(core.TAIPEI).strftime("%Y-%m-%d %H:%M:%S")}',0x2ECC71)
+        elif content in ('測試','测试','test','TEST'):await robust_send_discord(core,'✅ Discord 連線測試成功',f'{runtime_identity.RUNTIME_VERSION} runtime 正常｜{datetime.now(core.TAIPEI).strftime("%Y-%m-%d %H:%M:%S")}',0x2ECC71)
     core.state['discord_commands']='READY'
 
 
@@ -230,11 +232,11 @@ def install(core: Any) -> None:
     async def learning_tick_wrapper():await learning_tick_v5(core)
     async def scan_wrapper():return await scan_v5(core)
     async def scan_worker_wrapper():await scan_worker_v5(core)
-    core.learning_tick=learning_tick_wrapper;core.scan=scan_wrapper;core.scan_worker=scan_worker_wrapper;core.app.version='5.0.0';core.state['runtime_version']=V5_VERSION
+    core.learning_tick=learning_tick_wrapper;core.scan=scan_wrapper;core.scan_worker=scan_worker_wrapper;runtime_identity.stamp(core)
     if not any(getattr(route,'path',None)=='/api/discord/test' for route in core.app.router.routes):
         @core.app.post('/api/discord/test')
         async def discord_test() -> dict[str,Any]:
-            ok=await robust_send_discord(core,'✅ Discord 連線測試成功',f'ETH Adaptive AI {V5_VERSION}｜台灣時間 {datetime.now(core.TAIPEI).strftime("%Y-%m-%d %H:%M:%S")}',0x2ECC71);return {'ok':ok,'discord':core.state.get('discord')}
+            ok=await robust_send_discord(core,'✅ Discord 連線測試成功',f'{runtime_identity.PRODUCT_NAME} {runtime_identity.RUNTIME_VERSION}｜台灣時間 {datetime.now(core.TAIPEI).strftime("%Y-%m-%d %H:%M:%S")}',0x2ECC71);return {'ok':ok,'discord':core.state.get('discord')}
     if not any(getattr(route,'path',None)=='/api/v5/champions' for route in core.app.router.routes):
         @core.app.get('/api/v5/champions')
         def v5_champions() -> list[dict[str,Any]]:return _all_champions(core)

@@ -9,6 +9,7 @@ import execution_v7
 import v5_async_runtime
 import v5_runtime
 import v7_runtime
+import runtime_identity
 
 
 async def learning_tick_guarded(core: Any) -> None:
@@ -55,7 +56,7 @@ async def boot_notice_ordered_trades(core: Any) -> None:
         return
     ok = await v5_runtime.robust_send_discord(
         core,
-        '✅ ETH Adaptive AI v7 已啟動',
+        f'✅ {runtime_identity.PRODUCT_NAME} {runtime_identity.DISPLAY_VERSION} 已啟動',
         '舊 Execution PF 已退役。v7 使用 close-time-safe / point-in-time Signal OOF + 獨立 validation/audit；Entry/TP/SL 由 Gate 公開逐筆成交依時間順序監控；止損後有 cooldown + 新結構 reset；實盤 execution 結果獨立保存，不會污染 Signal Model。',
         0x3498DB,
     )

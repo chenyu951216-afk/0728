@@ -5,6 +5,7 @@ import time
 
 import v5_runtime
 import v6_runtime
+import runtime_identity
 
 
 def _legacy_runtime_allowed(core) -> bool:
@@ -151,6 +152,8 @@ async def learning_tick_v5_async(core) -> None:
         'derivative_replay_watermark': watermark,
         'source_generation_reset': generation_reset,
         'live_samples_added': live_added,
+        'causal_samples_added': samples,
+        # Kept only so old persisted dashboards/state readers can migrate safely.
         'v5_samples_added': samples,
         'sample_counts': counts,
         'champions': champions,
@@ -181,7 +184,7 @@ async def learning_tick_v5_async(core) -> None:
         if core.get_state('discord_boot_version_v6') != v6_runtime.V6_VERSION:
             ok = await v5_runtime.robust_send_discord(
                 core,
-                '✅ ETH Adaptive AI v6 已啟動',
+                f'✅ {runtime_identity.PRODUCT_NAME} {runtime_identity.DISPLAY_VERSION} 已啟動',
                 'Signal Champion + Execution Champion 雙層 OOS 驗證已啟用。新的 Entry / SL / TP / 分批 / BE / trailing 必須和歷史未見資料驗證完全一致；未通過 execution OOS 的方向模型不會建立正式交易計畫。',
                 0x3498DB,
             )

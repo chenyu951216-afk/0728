@@ -8,8 +8,9 @@ from typing import Any
 import adaptive_v5 as signal
 import execution_v6 as execution
 import v5_runtime
+import runtime_identity
 
-V6_VERSION = '6.0.0-20260808'
+V6_VERSION = runtime_identity.RUNTIME_VERSION
 
 
 def _candidate_execution(core: Any, candidate: dict[str, Any], regime: str) -> dict[str, Any]:
@@ -339,7 +340,7 @@ def install(core: Any) -> None:
     core.update_signal_with_bar = lambda bar: update_signal_with_bar_v6(core, bar)
     core._close_signal = lambda row, price, reason, ts: close_signal_v6(core, row, price, reason, ts)
     core.optimize_execution = lambda force=False: optimize_execution(core, force)
-    core.app.version = '6.0.0'
+    runtime_identity.stamp(core)
     core.state['runtime_version'] = V6_VERSION
 
     if not any(getattr(route, 'path', None) == '/api/v6/execution' for route in core.app.router.routes):

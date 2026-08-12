@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -11,8 +12,10 @@ import v13_replay_cursor_integrity as cursor_integrity
 import v15_data_resilience as resilience
 import v16_runtime_integrity as runtime_integrity
 import v20_historical_signal_evolution as evolution
+import v7_runtime
+import runtime_identity
 
-VERSION = '10.1.0-20260813'
+VERSION = runtime_identity.RUNTIME_VERSION
 FEATURE_SCHEMA = 9
 STATE_KEY = 'hierarchical_learning_schema'
 EXPECTED_LINEAGES = len(v5_runtime.STRATEGIES) * len(v5_runtime.DIRECTIONS)
@@ -28,6 +31,34 @@ PRICE_GROUPS = (
     ('MARKET_STRUCTURE', (('ETH', '1h'), ('ETH', '30m'), ('BTC', '1h'))),
     ('SHORT_HORIZON_EXECUTION', (('ETH', '15m'), ('ETH', '5m'))),
 )
+
+
+async def _unified_boot_notice(core: Any) -> None:
+    key = 'discord_boot_public_runtime'
+    if core.get_state(key, '') == VERSION or core.state.get('discord_boot_public_runtime_inflight'):
+        return
+    # This assignment occurs before the first await, so concurrent asyncio workers
+    # cannot both send the same startup embed.
+    core.state['discord_boot_public_runtime_inflight'] = True
+    try:
+        gate = price_collection_gate(core)
+        body = (
+            f"Runtime `{VERSION}`｜公開版本統一為 `{runtime_identity.DISPLAY_VERSION}`\n"
+            f"原始歷史資料 `{float(gate.get('percent') or 0):.2f}%`｜Replay 在資料收齊前固定 `0%`\n"
+            '流程：1D/4H 大趨勢 → 1H/30M 結構 → 15M/5M 短線決策 → sealed OOS → untouched execution audit。\n'
+            '歷史決策只能看到當時已收盤資料；Entry/SL/TP 凍結後，未來 5M 才依時間順序快轉揭露。\n'
+            '舊版名稱只保留為資料庫與 API 相容層，不代表仍在執行舊模型。'
+        )
+        ok = await v5_runtime.robust_send_discord(
+            core,
+            f'✅ {runtime_identity.PRODUCT_NAME} {runtime_identity.DISPLAY_VERSION} 已啟動',
+            body,
+            0x3498DB,
+        )
+        if ok:
+            core.set_state(key, VERSION)
+    finally:
+        core.state['discord_boot_public_runtime_inflight'] = False
 
 
 def _pct(value: float) -> float:
@@ -235,7 +266,7 @@ def _activate_collection_contract(core: Any, gate: dict[str, Any]) -> None:
         # decisions can never be silently omitted.
         cursor_integrity._reset_derived_replay(
             core,
-            '10.1 raw full-history start changed behind replay cursor; rebuild every causal decision from the frozen horizon',
+            f'{VERSION} raw full-history start changed behind replay cursor; rebuild every causal decision from the frozen horizon',
         )
     candidate.update({
         'activated_at': int(previous.get('activated_at') or time.time()),
@@ -388,13 +419,13 @@ def _ensure_feature_schema(core: Any) -> None:
     # sample table. Raw price/derivative caches and the dataset identity are kept.
     cursor_integrity._reset_derived_replay(
         core,
-        '10.1 causal full-history schema: collect the frozen raw horizon before rebuilding every point-in-time decision',
+        f'{VERSION} causal full-history schema: collect the frozen raw horizon before rebuilding every point-in-time decision',
     )
     core.set_state(COLLECTION_CUTOFF_KEY, int(time.time()))
     core.set_state(COLLECTION_CONTRACT_KEY, {})
     state = core.get_state('v18_final_system_state', {})
     state = dict(state) if isinstance(state, dict) else {}
-    state.update({'last_cert_completed_at': 0, 'status': 'WAITING_FOR_FULL_HISTORY', 'reason': '10.1 must collect the frozen multi-timeframe price horizon before causal replay and certification'})
+    state.update({'last_cert_completed_at': 0, 'status': 'WAITING_FOR_FULL_HISTORY', 'reason': f'{VERSION} must collect the frozen multi-timeframe price horizon before causal replay and certification'})
     core.set_state('v18_final_system_state', state)
     core.set_state(STATE_KEY, FEATURE_SCHEMA)
 
@@ -404,6 +435,11 @@ def install(core: Any) -> None:
     core.BACKFILL_PLAN = [('ETH', '1d'), ('ETH', '4h'), ('BTC', '1h'), ('ETH', '1h'), ('ETH', '30m'), ('ETH', '15m'), ('ETH', '5m')]
     core.price_collection_gate = lambda: price_collection_gate(core)
     _install_full_history_replay_gate(core)
+    # Only the final runtime may own public boot messages. Earlier names remain
+    # storage/code compatibility identifiers and are never advertised to users.
+    v5_runtime.maybe_boot_notice = lambda _core: _unified_boot_notice(_core)
+    v7_runtime.maybe_boot_notice = lambda _core: _unified_boot_notice(_core)
+    core.final_boot_notice = lambda: _unified_boot_notice(core)
     def hierarchical_bootstrap_progress(_con: Any = None) -> dict[str, Any]:
         foundation = price_foundation(core)
         return {
@@ -426,8 +462,7 @@ def install(core: Any) -> None:
         pipeline_status(core)
 
     core.learning_tick = hierarchical_learning_tick
-    core.state['runtime_version'] = VERSION
-    core.app.version = '10.1.0'
+    runtime_identity.stamp(core)
     core.state.setdefault('strict_replay', {})['hierarchical_pipeline'] = {
         'runtime': VERSION, 'feature_schema': FEATURE_SCHEMA,
         'learning_order': ['1D/4H macro', '1H/30M structure', '15M/5M short-horizon', 'sealed OOS', 'Entry/SL/TP untouched audit'],
@@ -442,3 +477,41 @@ def install(core: Any) -> None:
         @core.app.get('/api/v22/pipeline')
         def hierarchical_pipeline_status() -> dict[str, Any]:
             return pipeline_status(core)
+
+    if not any(getattr(route, 'path', None) == '/api/latest/pipeline' for route in core.app.router.routes):
+        @core.app.get('/api/latest/pipeline')
+        def latest_pipeline() -> dict[str, Any]:
+            return pipeline_status(core)
+
+    if not any(getattr(route, 'path', None) == '/api/latest/champions' for route in core.app.router.routes):
+        @core.app.get('/api/latest/champions')
+        def latest_champions() -> list[dict[str, Any]]:
+            return v5_runtime._all_champions(core)
+
+    if not any(getattr(route, 'path', None) == '/api/latest/execution' for route in core.app.router.routes):
+        @core.app.get('/api/latest/execution')
+        def latest_execution() -> dict[str, Any]:
+            return {'runtime': VERSION, 'registry': v7_runtime._execution_status(core), 'state': core.state.get('execution_learning', {})}
+
+    if not any(getattr(route, 'path', None) == '/api/latest/execution/train' for route in core.app.router.routes):
+        @core.app.post('/api/latest/execution/train')
+        async def latest_execution_train() -> dict[str, Any]:
+            results = await asyncio.to_thread(v7_runtime.execution.optimize_all, core, True)
+            core.state['execution_learning'] = {
+                'version': VERSION, 'results': results,
+                'registry': v7_runtime._execution_status(core)[:50],
+                'updated_at': int(time.time()),
+            }
+            await v7_runtime._notify_execution_results(core, results)
+            return {'runtime': VERSION, 'results': results}
+
+    if not any(getattr(route, 'path', None) == '/api/latest/trade-monitor' for route in core.app.router.routes):
+        @core.app.get('/api/latest/trade-monitor')
+        def latest_trade_monitor() -> dict[str, Any]:
+            return {'runtime': VERSION, 'mode': 'GATE_PUBLIC_TRADES_ORDERED', 'state': core.state.get('risk_monitor')}
+
+    if not any(getattr(route, 'path', None) == '/api/latest/final-status' for route in core.app.router.routes):
+        @core.app.get('/api/latest/final-status')
+        def latest_final_status() -> dict[str, Any]:
+            import v18_final_system
+            return v18_final_system._authoritative_view(core)

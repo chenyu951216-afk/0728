@@ -10,8 +10,9 @@ import v5_runtime
 import v7_timesafe_learning
 import v9_final
 import v10_final_integrity as final
+import runtime_identity
 
-VERSION = '8.2.3-20260810'
+VERSION = runtime_identity.RUNTIME_VERSION
 INTEGRITY_SCHEMA = 2
 STATE_KEY = 'replay_cursor_integrity_schema'
 
@@ -364,4 +365,4 @@ def install(core: Any) -> None:
         'outcomes_computed_before_sample_transaction': True,
     }
     core.state['runtime_version'] = VERSION
-    core.app.version = '8.2.3'
+    runtime_identity.stamp(core)

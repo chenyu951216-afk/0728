@@ -16,8 +16,9 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 import adaptive_v5 as base
 import v5_runtime
 import v8_evolution as evo
+import runtime_identity
 
-VERSION = '10.1.0-20260813'
+VERSION = runtime_identity.RUNTIME_VERSION
 GENOME_SCHEMA = 5
 GENERATIONS = max(3, min(12, int(os.getenv('SIGNAL_EVOLUTION_GENERATIONS', '7'))))
 POPULATION = max(16, min(96, int(os.getenv('SIGNAL_EVOLUTION_POPULATION', '36'))))
