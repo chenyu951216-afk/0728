@@ -20,7 +20,7 @@ import v16_runtime_integrity as runtime_integrity
 import v17_certification_orchestrator as cert17
 
 
-VERSION = '9.0.0-20260811'
+VERSION = '9.2.0-20260812'
 SCHEMA = 1
 STATE_KEY = 'v18_final_system_state'
 AUDIT_KEY = 'v18_final_dataset_audit'
@@ -469,15 +469,15 @@ def certify_and_execute(core: Any, force: bool = False) -> list[dict[str, Any]]:
 
         state.update({
             'version': VERSION, 'status': 'SIGNAL_CERTIFICATION_RUNNING',
-            'reason': 'all seven strategy archetypes x both directions are being compared by nested purged OOS and overfit guards',
+            'reason': 'regime-specialist populations are evolving across all strategy directions; only one never-before-seen chronological holdout may certify each lineage',
             'started_at': now, 'updated_at': now, 'sample_total_at_start': int(snap.get('learning_samples') or 0),
             'sample_max_ts_at_start': snap.get('sample_max_ts'), 'registry_cleanup': registry_cleanup,
         })
         core.set_state(STATE_KEY, state)
         core.state.setdefault('learning', {})['phase'] = 'SIGNAL_CERTIFICATION_RUNNING'
 
-        # Force means "run this eligible certification now". The underlying learner is
-        # still the v8 GenomeEvolutionLearner with v10 clustered-OOS promotion guard.
+        # Force means "run this eligible certification now". The learner itself still
+        # refuses to reopen a previously consumed holdout.
         results = list(_ORIGINAL_CERT17_TRAIN(core, True) or [])
         sig_count, _ = runtime_integrity._champion_counts(core)
         execution_results: list[dict[str, Any]] = []
@@ -492,12 +492,17 @@ def certify_and_execute(core: Any, force: bool = False) -> list[dict[str, Any]]:
             }
         sig_count, exe_count = runtime_integrity._champion_counts(core)
         promoted = [x for x in results if x.get('promoted')]
-        rejected = [x for x in results if not x.get('promoted')]
+        rejected = [x for x in results if not x.get('promoted') and x.get('status') not in (
+            'WAITING_NEW_UNTOUCHED_HOLDOUT', 'ABSOLUTE_PASS_INCUMBENT_HELD', 'ERROR',
+        )]
+        waiting = [x for x in results if x.get('status') == 'WAITING_NEW_UNTOUCHED_HOLDOUT']
+        incumbent_held = [x for x in results if x.get('status') == 'ABSOLUTE_PASS_INCUMBENT_HELD']
+        evolved = sum(int(x.get('candidates_evaluated') or 0) for x in results)
         exec_promoted = [x for x in execution_results if x.get('status') == 'CHAMPION']
         exec_rejected = [x for x in execution_results if x.get('status') not in ('CHAMPION', 'UNCHANGED')]
         if sig_count <= 0:
             status = 'NO_SIGNAL_MODEL_PASSED_OOS'
-            reason = f'0 Signal Champions; {len(rejected)} strategy-direction evaluations were rejected instead of being forced into production'
+            reason = f'0 Signal Champions after {evolved} evolved genomes; holdout rejected={len(rejected)}, awaiting genuinely new holdout={len(waiting)}, incumbent-held={len(incumbent_held)}'
         elif exe_count <= 0:
             status = 'WAITING_EXECUTION_AUDIT'
             reason = f'{sig_count} Signal Champion(s) exist, but no Entry/SL/TP policy has passed the untouched execution audit yet'
@@ -511,6 +516,8 @@ def certify_and_execute(core: Any, force: bool = False) -> list[dict[str, Any]]:
             'last_cert_completed_at': completed, 'last_cert_sample_total': int(snap.get('learning_samples') or 0),
             'last_cert_sample_max_ts': snap.get('sample_max_ts'), 'signal_champions': sig_count,
             'execution_champions': exe_count, 'signal_promoted': len(promoted), 'signal_rejected': len(rejected),
+            'signal_waiting_new_holdout': len(waiting), 'signal_incumbent_held': len(incumbent_held),
+            'signal_genomes_evaluated': evolved,
             'execution_promoted': len(exec_promoted), 'execution_rejected': len(exec_rejected),
             'signal_results': results, 'execution_results': execution_results,
             'regime_portfolio': portfolio,
@@ -520,6 +527,8 @@ def certify_and_execute(core: Any, force: bool = False) -> list[dict[str, Any]]:
         core.state['v18_pending_notice'] = {
             'at': completed, 'status': status, 'reason': reason,
             'signal_promoted': len(promoted), 'signal_rejected': len(rejected),
+            'signal_waiting_new_holdout': len(waiting), 'signal_incumbent_held': len(incumbent_held),
+            'signal_genomes_evaluated': evolved,
             'execution_promoted': len(exec_promoted), 'execution_rejected': len(exec_rejected),
             'signal_champions': sig_count, 'execution_champions': exe_count,
         }
@@ -668,9 +677,9 @@ async def _send_pending_notice(core: Any) -> None:
         return
     body = (
         f"狀態 `{notice.get('status')}`\n{notice.get('reason')}\n"
-        f"Signal：升級 `{notice.get('signal_promoted',0)}`｜淘汰 `{notice.get('signal_rejected',0)}`｜Champion `{notice.get('signal_champions',0)}`\n"
+        f"Signal：本輪進化 `{notice.get('signal_genomes_evaluated',0)}` 個 genome｜升級 `{notice.get('signal_promoted',0)}`｜新 holdout 未通過 `{notice.get('signal_rejected',0)}`｜等待新資料 `{notice.get('signal_waiting_new_holdout',0)}`｜舊 Champion 勝出 `{notice.get('signal_incumbent_held',0)}`｜Champion `{notice.get('signal_champions',0)}`\n"
         f"Execution：通過 `{notice.get('execution_promoted',0)}`｜淘汰 `{notice.get('execution_rejected',0)}`｜Champion `{notice.get('execution_champions',0)}`\n"
-        '所有 Signal 仍需 nested/purged OOS + 8h cluster overfit guard；所有 Entry/SL/TP 仍需 matching untouched execution audit。'
+        '策略只在 development 歷史內演化；每個 lineage 的 sealed holdout 只開一次。所有 Entry/SL/TP 仍需 matching untouched execution audit。'
     )
     ok = await v5_runtime.robust_send_discord(core, '🧠 ETH Final Strategy Certification', body, 0x57F287)
     if ok:
@@ -686,7 +695,7 @@ async def _final_boot_notice(core: Any) -> None:
         f"Replay `{float((view.get('replay') or {}).get('percent') or 0):.2f}%`｜Samples `{int((view.get('samples') or {}).get('rows') or 0):,}`\n"
         'Final Authority 已啟用：SQLite truth recovery、no-lookahead replay、Signal genome OOS、Execution untouched audit、live drift/post-exit learning、單一路徑 fail-closed。'
     )
-    if await v5_runtime.robust_send_discord(core, '✅ ETH Adaptive AI 9.0 Final Authority 已啟動', body, 0x3498DB):
+    if await v5_runtime.robust_send_discord(core, '✅ ETH Adaptive AI 9.2 Final Authority 已啟動', body, 0x3498DB):
         core.set_state('v18_boot_notice_version', VERSION)
 
 
@@ -744,7 +753,7 @@ def install(core: Any) -> None:
         'confirmed_structural_corruption_rebuilds_derived_only': True,
         'raw_market_preserved': True, 'raw_derivatives_preserved': True,
         'clean_dataset_id_preserved': True,
-        'all_7_strategies_x_2_directions_explicitly_certified': True,
+        'all_configured_strategy_directions_are_population_entrypoints': True,
         'signal_genome_evolution': [g['id'] for g in v8_evolution.GENOMES],
         'full_span_training_store': True,
         'model_max_rows_per_strategy_direction': v9_training_store.MODEL_MAX_ROWS,
@@ -759,7 +768,7 @@ def install(core: Any) -> None:
         'profit_guarantee': False,
     }
     core.state['runtime_version'] = VERSION
-    core.app.version = '9.0.0'
+    core.app.version = '9.2.0'
     _authoritative_view(core)
 
     if not any(getattr(r, 'path', None) == '/api/v18/final-status' for r in core.app.router.routes):

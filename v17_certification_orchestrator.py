@@ -207,16 +207,47 @@ def _run_detailed_certification(core: Any) -> list[dict[str, Any]]:
                     (strategy, direction),
                 ).fetchone()[0] or 0)
                 try:
+                    prior_run_id = 0
+                    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='signal_evolution_runs'").fetchone():
+                        row = con.execute(
+                            'SELECT COALESCE(MAX(run_id),0) FROM signal_evolution_runs WHERE strategy=? AND direction=?',
+                            (strategy, direction),
+                        ).fetchone()
+                        prior_run_id = int(row[0] or 0)
                     evaluation = learner.train_strategy_direction(strategy, direction)
                     if evaluation is None:
-                        item = {
-                            'strategy': strategy, 'direction': direction, 'status': 'NO_EVALUATION_OUTPUT',
-                            'sample_rows': sample_n, 'promoted': False,
-                            'reason': 'training produced no eligible OOS evaluation; usually insufficient class/fold/selected-signal evidence under current anti-overfit rules',
-                        }
+                        lineage = None
+                        if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='signal_evolution_runs'").fetchone():
+                            lineage = con.execute(
+                                '''SELECT run_id,holdout_end_ts,status,metrics FROM signal_evolution_runs
+                                   WHERE strategy=? AND direction=? ORDER BY run_id DESC LIMIT 1''',
+                                (strategy, direction),
+                            ).fetchone()
+                        if lineage:
+                            try:
+                                prior_metrics = json.loads(lineage[3]) if lineage[3] else {}
+                            except (TypeError, json.JSONDecodeError):
+                                prior_metrics = {}
+                            opened_now = int(lineage[0] or 0) > prior_run_id
+                            item = {
+                                'strategy': strategy, 'direction': direction,
+                                'status': str(lineage[2]) if opened_now else 'WAITING_NEW_UNTOUCHED_HOLDOUT',
+                                'sample_rows': sample_n, 'promoted': False,
+                                'prior_status': str(lineage[2]),
+                                'prior_holdout_end_ts': int(lineage[1] or 0),
+                                'candidates_evaluated': int(prior_metrics.get('candidates_evaluated') or 0),
+                                'reason': str(prior_metrics.get('reason') or '') if opened_now else 'prior evolution result is preserved; it cannot be retried or tuned again until a complete later untouched holdout matures',
+                            }
+                        else:
+                            item = {
+                                'strategy': strategy, 'direction': direction, 'status': 'NO_EVALUATION_OUTPUT',
+                                'sample_rows': sample_n, 'promoted': False,
+                                'reason': 'training produced no eligible OOS evaluation; usually insufficient class/fold/selected-signal evidence under current anti-overfit rules',
+                            }
                     else:
                         item = dict(evaluation.__dict__)
-                        item['status'] = 'PROMOTED' if bool(item.get('promoted')) else 'REJECTED_OOS'
+                        hinted_status = item.pop('evaluation_status', None)
+                        item['status'] = str(hinted_status or ('PROMOTED' if bool(item.get('promoted')) else 'REJECTED_OOS'))
                         item['sample_rows'] = sample_n
                     item['elapsed_seconds'] = round(time.monotonic() - started, 3)
                     results.append(item)
@@ -293,7 +324,11 @@ def train_v17(core: Any, force: bool = False) -> list[dict[str, Any]]:
     sig, exe = _champion_counts(core)
     errors = [x for x in results if x.get('status') == 'ERROR']
     promoted = [x for x in results if x.get('promoted')]
-    rejected = [x for x in results if x.get('status') in ('REJECTED_OOS', 'NO_EVALUATION_OUTPUT')]
+    rejected = [x for x in results if not x.get('promoted') and x.get('status') not in (
+        'WAITING_NEW_UNTOUCHED_HOLDOUT', 'ABSOLUTE_PASS_INCUMBENT_HELD', 'ERROR',
+    )]
+    waiting = [x for x in results if x.get('status') == 'WAITING_NEW_UNTOUCHED_HOLDOUT']
+    held = [x for x in results if x.get('status') == 'ABSOLUTE_PASS_INCUMBENT_HELD']
 
     if errors and len(errors) == len(results):
         status = 'SIGNAL_CERTIFICATION_FAILED'
@@ -303,14 +338,16 @@ def train_v17(core: Any, force: bool = False) -> list[dict[str, Any]]:
         reason = f'{sig} Signal Champion(s) certified; Execution walk-forward may proceed'
     else:
         status = 'NO_SIGNAL_MODEL_PASSED_OOS'
-        reason = f'0 Champions; {len(rejected)} strategy-direction candidates were rejected by OOS/anti-overfit evidence'
+        evolved = sum(int(x.get('candidates_evaluated') or 0) for x in results)
+        reason = f'0 Champions after {evolved} evolved genomes; sealed-holdout rejected={len(rejected)}, awaiting new untouched evidence={len(waiting)}, incumbent-held={len(held)}'
 
     completed = int(time.time())
     state.update({
         'status': status, 'reason': reason, 'completed_at': completed, 'last_completed_at': completed,
         'last_sample_total': signature['total'], 'last_sample_max_ts': signature['max_ts'],
         'signal_champions': sig, 'execution_champions': exe,
-        'promoted_count': len(promoted), 'rejected_count': len(rejected), 'error_count': len(errors),
+        'promoted_count': len(promoted), 'rejected_count': len(rejected), 'waiting_count': len(waiting),
+        'incumbent_held_count': len(held), 'error_count': len(errors),
         'results': results,
     })
     _save_state(core, state)

@@ -13,9 +13,11 @@ import server_v17 as base
 import v18_final_system as final_system
 import v18_operational_guard as operational_guard
 import v20_historical_signal_evolution as signal_evolution
+import v21_coinglass_standard as coinglass_standard
 from v18_final_system import install as install_final_system
 from v18_operational_guard import install as install_operational_guard
 from v20_historical_signal_evolution import install as install_signal_evolution
+from v21_coinglass_standard import install as install_coinglass_standard
 
 LOG = logging.getLogger('eth-adaptive.startup')
 core = base.core
@@ -23,19 +25,19 @@ core = base.core
 install_final_system(core)
 install_operational_guard(core)
 install_signal_evolution(core)
+install_coinglass_standard(core)
 
-RUNTIME_VERSION = '9.1.0-20260812'
+RUNTIME_VERSION = '9.2.0-20260812'
 core.state['runtime_version'] = RUNTIME_VERSION
 core.state.setdefault('strict_replay', {})['runtime'] = RUNTIME_VERSION
-core.app.version = '9.1.0'
+core.app.version = '9.2.0'
 
 app = core.app
 PORT = core.PORT
 
 # A failed generation must not be re-run hourly on byte-identical evidence. Repeatedly
 # peeking at the same OOS until something passes is itself meta-overfitting. A new
-# generation becomes due only after enough newly matured labels arrive (or the normal
-# long recertification interval with genuinely newer data), unless explicitly forced.
+# generation becomes due only after enough newly matured labels arrive, unless explicitly forced.
 def _evolution_certification_due(core_obj, snap: dict, force: bool) -> bool:
     if force:
         return True
@@ -48,16 +50,29 @@ def _evolution_certification_due(core_obj, snap: dict, force: bool) -> bool:
     last_at = int(state.get('last_cert_completed_at') or 0)
     if last_at <= 0 and total > 0:
         return True
-    if total - last_total >= final_system.RECERTIFY_MIN_NEW_SAMPLES:
-        return True
-    if max_ts > last_max and now - last_at >= final_system.RECERTIFY_SECONDS:
+    con = core_obj.db()
+    try:
+        new_decisions = int(con.execute(
+            'SELECT COUNT(DISTINCT ts) FROM learning_samples WHERE ts>?', (last_max,)
+        ).fetchone()[0] or 0)
+    finally:
+        con.close()
+    core_obj.state['evolution_recertification_gate'] = {
+        'new_untouched_decisions': new_decisions,
+        'required_untouched_decisions': signal_evolution.MIN_UNTOUCHED_HOLDOUT,
+        'last_certified_sample_ts': last_max,
+        'same_holdout_retry_forbidden': True,
+        'ready': new_decisions >= signal_evolution.MIN_UNTOUCHED_HOLDOUT,
+        'checked_at': now,
+    }
+    if new_decisions >= signal_evolution.MIN_UNTOUCHED_HOLDOUT:
         return True
     return False
 
 final_system._certification_due = _evolution_certification_due
 
 # Deduplicate Discord certification summaries by semantic result rather than timestamp.
-# A new generation/result still notifies; the same 0/14 result does not repeat hourly.
+# A new generation/result still notifies; an unchanged waiting/result summary does not repeat hourly.
 _original_send_pending_notice = final_system._send_pending_notice
 async def _dedup_send_pending_notice(core_obj):
     notice = core_obj.state.get('v18_pending_notice')
@@ -66,6 +81,7 @@ async def _dedup_send_pending_notice(core_obj):
     semantic = {k: notice.get(k) for k in (
         'status', 'reason', 'signal_promoted', 'signal_rejected',
         'execution_promoted', 'execution_rejected', 'signal_champions', 'execution_champions',
+        'signal_waiting_new_holdout', 'signal_incumbent_held', 'signal_genomes_evaluated',
     )}
     fp = hashlib.sha256(json.dumps(semantic, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:24]
     if core_obj.get_state('v20_last_cert_notice_fingerprint', '') == fp:
@@ -127,7 +143,7 @@ def _preflight_worker() -> None:
             'completed_at': int(time.time()), 'result': result,
         }
         _PREFLIGHT_READY.set()
-        LOG.info('9.1.0 startup provenance preflight complete: %s', result.get('status'))
+        LOG.info('9.2.0 startup provenance preflight complete: %s', result.get('status'))
     except Exception as exc:
         _PREFLIGHT_FAILED.set()
         core.state['startup_preflight'] = {
@@ -135,7 +151,7 @@ def _preflight_worker() -> None:
             'failed_at': int(time.time()), 'error': f'{type(exc).__name__}: {exc}',
             'reason': 'web remains online; certification and new orders remain fail-closed until this is repaired',
         }
-        LOG.exception('9.1.0 startup provenance preflight failed')
+        LOG.exception('9.2.0 startup provenance preflight failed')
 
 
 threading.Thread(target=_preflight_worker, name='source-provenance-preflight', daemon=True).start()
@@ -146,8 +162,8 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 @app.get('/', response_class=HTMLResponse)
 def dashboard() -> str:
     html = base.dashboard()
-    html = html.replace('ETH Adaptive AI 8.4.1 Certification Orchestrator', 'ETH Adaptive AI 9.1.0 Historical Evolution')
-    html = html.replace('ETH Adaptive AI 8.4', 'ETH Adaptive AI 9.1.0')
+    html = html.replace('ETH Adaptive AI 8.4.1 Certification Orchestrator', 'ETH Adaptive AI 9.2.0 Historical Evolution')
+    html = html.replace('ETH Adaptive AI 8.4', 'ETH Adaptive AI 9.2.0')
     startup_card = '''
 <section class="card"><h2>🧬 Historical Strategy Evolution / Final Authority</h2>
 <div id="startup19" class="notice">讀取最終學習狀態…</div>

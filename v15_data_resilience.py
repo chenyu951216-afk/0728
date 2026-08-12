@@ -25,6 +25,7 @@ GAP_KEY = 'final_price_gap_registry_v1'
 PRICE_PRIORITY = ('gate', 'bybit', 'binance', 'okx')
 OI_PRIORITY = ('bybit_oi', 'gate_stats', 'cg_oi')
 FUNDING_PRIORITY = ('funding_binance', 'funding_bybit')
+COINGLASS_STANDARD_ENRICHMENT = ('cg_oi_funding', 'cg_taker', 'cg_crowd', 'cg_top_position')
 GAP_REPAIR_ROUNDS = max(1, min(5, int(os.getenv('STRICT_GAP_REPAIR_ROUNDS', '2'))))
 MAX_QUARANTINED_GAPS = max(0, min(200, int(os.getenv('STRICT_MAX_QUARANTINED_GAPS', '24'))))
 CG_RANGE_RE = re.compile(r'earliest allowed start_time is\s*(\d+)', re.I)
@@ -82,6 +83,10 @@ def _metric_for_key(key: str) -> tuple[str, str] | None:
         'bybit_oi': ('bybit', 'oi_coin'), 'gate_stats': ('gate', 'oi_usd'), 'cg_oi': ('coinglass', 'oi_usd'),
         'funding_binance': ('binance', 'funding'), 'funding_bybit': ('bybit', 'funding'),
         'cg_liq': ('coinglass', 'liq_long_usd'), 'cg_book': ('coinglass', 'book_imbalance'),
+        'cg_oi_funding': ('coinglass', 'oi_weighted_funding'),
+        'cg_taker': ('coinglass', 'taker_imbalance'),
+        'cg_crowd': ('coinglass', 'crowd_skew'),
+        'cg_top_position': ('coinglass', 'top_position_skew'),
     }.get(key)
 
 
@@ -116,6 +121,9 @@ def _full_span(core: Any, key: str, model_start: int) -> bool:
 
 
 def _settled(core: Any, keys: tuple[str, ...]) -> bool:
+    if keys and all(key in COINGLASS_STANDARD_ENRICHMENT for key in keys):
+        if not getattr(core.derivative_history, 'coinglass_key', ''):
+            return True
     return all(_complete(core, k) or fin._src(core, k).get('disabled') or _range_limited(core, k) for k in keys)
 
 
@@ -127,7 +135,8 @@ def _freeze_sources(core: Any) -> dict[str, Any]:
     base = int(core.START_TS) + WARMUP_SECONDS
     oi = [k for k in OI_PRIORITY if _complete(core, k) and _full_span(core, k, base)]
     funding = [k for k in FUNDING_PRIORITY if _complete(core, k) and _full_span(core, k, base)]
-    if not ((oi or _settled(core, OI_PRIORITY)) and (funding or _settled(core, FUNDING_PRIORITY))):
+    standard_settled = _settled(core, COINGLASS_STANDARD_ENRICHMENT)
+    if not ((oi or _settled(core, OI_PRIORITY)) and (funding or _settled(core, FUNDING_PRIORITY)) and standard_settled):
         state['oi_mode'] = 'FULL_SPAN_MODEL_ELIGIBLE' if oi else 'PENDING'
         state['funding_mode'] = 'FULL_SPAN_MODEL_ELIGIBLE' if funding else 'PENDING'
         _save(core, state)
@@ -152,7 +161,7 @@ def _freeze_sources(core: Any) -> dict[str, Any]:
 
     # Recent-retention optional sources are never historical model features.
     enrichment: list[str] = []
-    for key in ('cg_liq', 'cg_book'):
+    for key in ('cg_liq', 'cg_book', *COINGLASS_STANDARD_ENRICHMENT):
         if _complete(core, key) and _full_span(core, key, int(state['effective_model_start'])):
             enrichment.append(key)
     # Gate liquidation is admitted only if both sides genuinely cover the full span.
@@ -331,13 +340,32 @@ def strict_extras(core: Any, history: Any, decision_ts: int) -> dict[str, float]
         for src, rows in series('book_imbalance', lagged, 12 * 3600).items():
             if src == 'coinglass' and rows: book.append(float(rows[0]['value'])); bq.append(float(rows[0]['quality']))
 
-    avail = (bool(oi), bool(funding), bool(liq), bool(book)); qs = oiq + fq + lq + bq
+    def optional_value(key: str, metric: str, age: int = 12 * 3600) -> tuple[float, bool, float | None]:
+        if key not in enrichment or not fin._coverage_allows(core, key, lagged):
+            return 0.0, False, None
+        rows = [row for values in series(metric, lagged, age).values() for row in values[:1]]
+        if not rows:
+            return 0.0, False, None
+        return statistics.median(float(row['value']) for row in rows), True, statistics.mean(float(row['quality']) for row in rows)
+
+    oi_weighted_funding, oi_weighted_funding_ok, oi_weighted_funding_q = optional_value('cg_oi_funding', 'oi_weighted_funding', 20 * 3600)
+    taker_imbalance, taker_ok, taker_q = optional_value('cg_taker', 'taker_imbalance')
+    crowd_skew, crowd_ok, crowd_q = optional_value('cg_crowd', 'crowd_skew')
+    top_position_skew, top_position_ok, top_position_q = optional_value('cg_top_position', 'top_position_skew')
+
+    avail = (bool(oi), bool(funding), bool(liq), bool(book), oi_weighted_funding_ok, taker_ok, crowd_ok, top_position_ok)
+    qs = oiq + fq + lq + bq + [q for q in (oi_weighted_funding_q, taker_q, crowd_q, top_position_q) if q is not None]
     return {'oi_change': statistics.median(oi) if oi else 0.0, 'funding': statistics.median(funding) if funding else 0.0,
             'liquidation_imbalance': statistics.median(liq) if liq else 0.0,
             'liquidation_intensity': math.log1p(statistics.median(totals)) / 25.0 if totals else 0.0,
-            'book_imbalance': statistics.median(book) if book else 0.0, 'oi_available': float(bool(oi)),
+            'book_imbalance': statistics.median(book) if book else 0.0,
+            'oi_weighted_funding': oi_weighted_funding, 'taker_imbalance': taker_imbalance,
+            'crowd_skew': crowd_skew, 'top_position_skew': top_position_skew,
+            'oi_available': float(bool(oi)),
             'funding_available': float(bool(funding)), 'liquidation_available': float(bool(liq)), 'book_available': float(bool(book)),
-            'derivative_coverage': sum(avail) / 4.0, 'derivative_quality': statistics.mean(qs) / 100.0 if qs else 0.0,
+            'oi_weighted_funding_available': float(oi_weighted_funding_ok), 'taker_available': float(taker_ok),
+            'crowd_available': float(crowd_ok), 'top_position_available': float(top_position_ok),
+            'derivative_coverage': sum(avail) / len(avail), 'derivative_quality': statistics.mean(qs) / 100.0 if qs else 0.0,
             'historical_derivative_safety_lag_seconds': float(v9_final.DERIVATIVE_SAFETY_LAG_SECONDS)}
 
 
