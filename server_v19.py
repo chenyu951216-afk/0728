@@ -14,10 +14,12 @@ import v18_final_system as final_system
 import v18_operational_guard as operational_guard
 import v20_historical_signal_evolution as signal_evolution
 import v21_coinglass_standard as coinglass_standard
+import v22_hierarchical_pipeline as hierarchical_pipeline
 from v18_final_system import install as install_final_system
 from v18_operational_guard import install as install_operational_guard
 from v20_historical_signal_evolution import install as install_signal_evolution
 from v21_coinglass_standard import install as install_coinglass_standard
+from v22_hierarchical_pipeline import install as install_hierarchical_pipeline
 
 LOG = logging.getLogger('eth-adaptive.startup')
 core = base.core
@@ -26,11 +28,12 @@ install_final_system(core)
 install_operational_guard(core)
 install_signal_evolution(core)
 install_coinglass_standard(core)
+install_hierarchical_pipeline(core)
 
-RUNTIME_VERSION = '9.2.0-20260812'
+RUNTIME_VERSION = '10.0.0-20260812'
 core.state['runtime_version'] = RUNTIME_VERSION
 core.state.setdefault('strict_replay', {})['runtime'] = RUNTIME_VERSION
-core.app.version = '9.2.0'
+core.app.version = '10.0.0'
 
 app = core.app
 PORT = core.PORT
@@ -143,7 +146,7 @@ def _preflight_worker() -> None:
             'completed_at': int(time.time()), 'result': result,
         }
         _PREFLIGHT_READY.set()
-        LOG.info('9.2.0 startup provenance preflight complete: %s', result.get('status'))
+        LOG.info('10.0.0 startup provenance preflight complete: %s', result.get('status'))
     except Exception as exc:
         _PREFLIGHT_FAILED.set()
         core.state['startup_preflight'] = {
@@ -151,7 +154,7 @@ def _preflight_worker() -> None:
             'failed_at': int(time.time()), 'error': f'{type(exc).__name__}: {exc}',
             'reason': 'web remains online; certification and new orders remain fail-closed until this is repaired',
         }
-        LOG.exception('9.2.0 startup provenance preflight failed')
+        LOG.exception('10.0.0 startup provenance preflight failed')
 
 
 threading.Thread(target=_preflight_worker, name='source-provenance-preflight', daemon=True).start()
@@ -162,12 +165,13 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 @app.get('/', response_class=HTMLResponse)
 def dashboard() -> str:
     html = base.dashboard()
-    html = html.replace('ETH Adaptive AI 8.4.1 Certification Orchestrator', 'ETH Adaptive AI 9.2.0 Historical Evolution')
-    html = html.replace('ETH Adaptive AI 8.4', 'ETH Adaptive AI 9.2.0')
+    html = html.replace('ETH Adaptive AI 8.4.1 Certification Orchestrator', 'ETH Adaptive AI 10.0 Hierarchical Learning')
+    html = html.replace('ETH Adaptive AI 8.4', 'ETH Adaptive AI 10.0')
     startup_card = '''
-<section class="card"><h2>🧬 Historical Strategy Evolution / Final Authority</h2>
-<div id="startup19" class="notice">讀取最終學習狀態…</div>
-<details><summary>查看進化與啟動狀態</summary><pre id="startup19detail">—</pre></details></section>
+<section class="card"><h2>🧭 Hierarchical Point-in-Time Learning / Final Authority</h2>
+<div id="startup19" class="notice">讀取八階段學習狀態…</div>
+<div id="pipelineStages" style="margin-top:10px"></div>
+<details><summary>查看資料、進化、sealed OOS 與 execution audit 證據</summary><pre id="startup19detail">—</pre></details></section>
 '''
     marker = '</div><div class="footer">'
     if marker in html:
@@ -177,14 +181,15 @@ async function refreshStartup19(){
   const root=document.getElementById('startup19'), detail=document.getElementById('startup19detail');
   if(!root)return;
   try{
-    const s=await fetch('/api/state',{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()});
-    const p=s.startup_preflight||{}, e=s.historical_signal_evolution||{};
-    const ok=p.ready===true;
+    const s=await fetch('/api/v22/pipeline',{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()});
+    const p=s.startup_preflight||{}, ok=s.operational===true, stages=s.stages||[];
     root.className='notice '+(ok?'g':(p.status==='FAILED'?'r':'y'));
-    root.innerHTML='<b>'+String(p.status||'BOOTING')+'</b><br>'+String(p.reason||((p.result||{}).status)||'等待背景來源稽核完成')+
-      '<br>Signal Evolution：<b>'+String(e.generations||'—')+' 代 × '+String(e.population||'—')+' population</b>｜Final holdout '+(Number(e.final_holdout_pct||0)*100).toFixed(0)+'% sealed'+
-      '<br>認證/新單：<b>'+(ok?'可依 OOS + Execution audit 安全門檻運作':'Fail-closed')+'</b>';
-    if(detail)detail.textContent=JSON.stringify({startup_preflight:p,historical_signal_evolution:e,certification_startup_gate:s.certification_startup_gate,live_startup_gate:s.live_startup_gate,runtime:s.runtime_version},null,2);
+    root.innerHTML='<b>'+String(s.final_status||'LEARNING')+'</b>｜整體 '+Number(s.overall_percent||0).toFixed(2)+'%<br>目前：'+String(s.active_stage||'初始化')+
+      '<br>'+String(s.final_reason||'由 1D/4H 宏觀 → 1H/30M 結構 → 15M/5M 短線，逐時點回放且禁止重用 sealed OOS')+
+      '<br>認證/新單：<b>'+(ok?'Signal + Execution 雙認證通過':'Fail-closed，尚不可下單')+'</b>';
+    const box=document.getElementById('pipelineStages');
+    if(box)box.innerHTML=stages.map(x=>'<div class="row"><span>'+String(x.name)+'</span><b>'+Number(x.percent||0).toFixed(2)+'% · '+String(x.status||'—')+'</b></div>').join('');
+    if(detail)detail.textContent=JSON.stringify(s,null,2);
   }catch(e){root.className='notice r';root.textContent='Final state 讀取失敗：'+String(e)}
 }
 refreshStartup19();setInterval(refreshStartup19,5000);

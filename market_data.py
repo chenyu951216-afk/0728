@@ -31,11 +31,16 @@ def _f(value: Any, default: float = 0.0) -> float:
 
 class SourceError(RuntimeError): pass
 
+
+class SourceRangeUnavailable(SourceError):
+    """The provider documents/returns a bounded historical retention window."""
+
 class MarketDataHub:
     """Multi-exchange public-data hub. Missing fields are never fabricated."""
     GATE = "https://api.gateio.ws/api/v4"
     BYBIT = "https://api.bybit.com"
     OKX = "https://www.okx.com"
+    BITGET = "https://api.bitget.com"
     BINANCE_FUT = "https://fapi.binance.com"
     BINANCE_SPOT = "https://api.binance.com"
 
@@ -44,10 +49,16 @@ class MarketDataHub:
         self.headers = {"Accept": "application/json", "User-Agent": "eth-adaptive-research/4"}
 
     async def _json(self, client: httpx.AsyncClient, url: str, params: dict[str, Any] | None = None) -> Any:
-        response = await client.get(url, params=params, headers=self.headers); response.raise_for_status(); data = response.json()
+        response = await client.get(url, params=params, headers=self.headers)
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            detail = response.text[:500].replace("\n", " ")
+            raise SourceError(f"HTTP {response.status_code} {url}: {detail}") from exc
+        data = response.json()
         if isinstance(data, dict):
             if data.get("retCode") not in (None, 0): raise SourceError(f"Bybit {data.get('retCode')}: {data.get('retMsg')}")
-            if data.get("code") not in (None, "0", 0): raise SourceError(f"source code={data.get('code')} msg={data.get('msg')}")
+            if data.get("code") not in (None, "0", "00000", 0): raise SourceError(f"source code={data.get('code')} msg={data.get('msg')}")
         return data
 
     @staticmethod
@@ -56,6 +67,10 @@ class MarketDataHub:
         return [x for x in candles if x.ts + sec <= now]
 
     async def gate_candles(self, client: httpx.AsyncClient, symbol: str, tf: str, *, end_ts: int | None = None, limit: int = 1000, spot: bool = False) -> list[Candle]:
+        # Gate futures currently rejects candles older than its most recent 10,000
+        # points. Detect that capability before making a guaranteed-400 request.
+        if not spot and end_ts and end_ts < int(time.time()) - TIMEFRAME_SECONDS[tf] * 9_950:
+            raise SourceRangeUnavailable(f"gate {tf} history ends before its recent-10000-point retention window")
         if spot:
             params: dict[str, Any] = {"currency_pair": symbol, "interval": tf, "limit": min(limit, 1000)}; path = "/spot/candlesticks"
         else:
@@ -94,8 +109,31 @@ class MarketDataHub:
         rows=await self._json(client,base+path,params); result=[Candle(int(_f(x[0])/1000),_f(x[1]),_f(x[2]),_f(x[3]),_f(x[4]),_f(x[5]),_f(x[7] if len(x)>7 else 0),"binance") for x in rows or []]
         result.sort(key=lambda x:x.ts); return self._drop_open(result,tf)
 
+    async def bitget_candles(self, client: httpx.AsyncClient, symbol: str, tf: str, *, end_ts: int | None = None, limit: int = 1000, spot: bool = False) -> list[Candle]:
+        interval = {"1m":"1m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4h":"4H","1d":"1D"}[tf]
+        params: dict[str, Any] = {
+            "category": "SPOT" if spot else "USDT-FUTURES", "symbol": symbol,
+            "interval": interval, "type": "market", "limit": min(limit, 100),
+        }
+        if end_ts:
+            params["endTime"] = end_ts * 1000
+            params["startTime"] = max(0, end_ts - min(90 * 86400, TIMEFRAME_SECONDS[tf] * min(limit, 100))) * 1000
+        data = await self._json(client, self.BITGET + "/api/v3/market/history-candles", params)
+        rows = (data or {}).get("data") or []
+        result = [Candle(int(_f(x[0]) / 1000), _f(x[1]), _f(x[2]), _f(x[3]), _f(x[4]), _f(x[5]), _f(x[6] if len(x) > 6 else 0), "bitget") for x in rows]
+        result.sort(key=lambda x: x.ts)
+        return self._drop_open(result, tf)
+
+    @staticmethod
+    def history_source_order(tf: str, end_ts: int | None = None, *, spot: bool = False) -> tuple[str, ...]:
+        if spot:
+            return ("gate", "bybit", "binance", "okx", "bitget")
+        if end_ts and end_ts < int(time.time()) - TIMEFRAME_SECONDS[tf] * 9_950:
+            return ("bybit", "binance", "okx", "bitget")
+        return ("gate", "bybit", "binance", "okx", "bitget")
+
     async def fetch_history(self, source: str, asset: str, tf: str, *, end_ts: int | None = None, limit: int = 1000, spot: bool = False) -> list[Candle]:
-        mapping={"gate":"ETH_USDT" if asset=="ETH" else "BTC_USDT","bybit":"ETHUSDT" if asset=="ETH" else "BTCUSDT","okx":f"{asset}-USDT" if spot else f"{asset}-USDT-SWAP","binance":f"{asset}USDT"}
+        mapping={"gate":"ETH_USDT" if asset=="ETH" else "BTC_USDT","bybit":"ETHUSDT" if asset=="ETH" else "BTCUSDT","okx":f"{asset}-USDT" if spot else f"{asset}-USDT-SWAP","binance":f"{asset}USDT","bitget":f"{asset}USDT"}
         if source not in mapping: raise ValueError(f"unknown source {source}")
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             return await getattr(self,f"{source}_candles")(client,mapping[source],tf,end_ts=end_ts,limit=limit,spot=spot)
@@ -109,14 +147,14 @@ class MarketDataHub:
             for i,(asset,tf,lim) in enumerate(specs):
                 if not isinstance(repaired[i],Exception) and repaired[i]: continue
                 spot=i==7
-                for source in ("bybit","binance","okx"):
+                for source in ("bybit","binance","okx","bitget"):
                     try:
-                        symbol={"bybit":f"{asset}USDT","binance":f"{asset}USDT","okx":f"{asset}-USDT" if spot else f"{asset}-USDT-SWAP"}[source]
+                        symbol={"bybit":f"{asset}USDT","binance":f"{asset}USDT","okx":f"{asset}-USDT" if spot else f"{asset}-USDT-SWAP","bitget":f"{asset}USDT"}[source]
                         rows=await getattr(self,f"{source}_candles")(client,symbol,tf,limit=lim,spot=spot)
                         if rows: repaired[i]=rows; break
                     except Exception: continue
             gate_result=repaired
-            validators={"bybit":self.bybit_candles(client,"ETHUSDT","15m",limit=100),"okx":self.okx_candles(client,"ETH-USDT-SWAP","15m",limit=100),"binance":self.binance_candles(client,"ETHUSDT","15m",limit=100)}
+            validators={"bybit":self.bybit_candles(client,"ETHUSDT","15m",limit=100),"okx":self.okx_candles(client,"ETH-USDT-SWAP","15m",limit=100),"binance":self.binance_candles(client,"ETHUSDT","15m",limit=100),"bitget":self.bitget_candles(client,"ETHUSDT","15m",limit=100)}
             validation_raw=await asyncio.gather(*validators.values(),return_exceptions=True)
             derivative_tasks={"bybit_ticker":self._json(client,self.BYBIT+"/v5/market/tickers",{"category":"linear","symbol":"ETHUSDT"}),"bybit_oi":self._json(client,self.BYBIT+"/v5/market/open-interest",{"category":"linear","symbol":"ETHUSDT","intervalTime":"15min","limit":2}),"bybit_funding":self._json(client,self.BYBIT+"/v5/market/funding/history",{"category":"linear","symbol":"ETHUSDT","limit":2}),"binance_oi":self._json(client,self.BINANCE_FUT+"/fapi/v1/openInterest",{"symbol":"ETHUSDT"}),"binance_funding":self._json(client,self.BINANCE_FUT+"/fapi/v1/fundingRate",{"symbol":"ETHUSDT","limit":2}),"okx_oi":self._json(client,self.OKX+"/api/v5/public/open-interest",{"instType":"SWAP","instId":"ETH-USDT-SWAP"}),"okx_funding":self._json(client,self.OKX+"/api/v5/public/funding-rate-history",{"instId":"ETH-USDT-SWAP","limit":2})}
             derivative_raw=await asyncio.gather(*derivative_tasks.values(),return_exceptions=True)

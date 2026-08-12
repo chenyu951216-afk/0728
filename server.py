@@ -127,7 +127,7 @@ core.state['strict_replay']['learning_scheduler'] = {
     'internal_price_gap_targeted_repair': True,
     'unresolved_price_gap_cannot_advance_replay_cursor': True,
     'confirmed_unrecoverable_gap_can_be_audited_and_omitted_without_fabrication': True,
-    'fixed_price_fallback_priority': ['gate', 'bybit', 'binance', 'okx'],
+    'fixed_price_fallback_priority': ['gate', 'bybit', 'binance', 'okx', 'bitget'],
     'feature_builder_contract_verified': True,
     'throughput_io_optimized': True,
     'performance_patch_resets_clean_dataset': False,

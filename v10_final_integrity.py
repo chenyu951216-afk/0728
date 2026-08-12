@@ -28,7 +28,7 @@ STATE_KEY = 'final_derivative_coverage_v2'
 INTERVAL = 4 * 3600
 READY_SAFETY_SECONDS = 2 * INTERVAL
 GATE_STATS_PUBLIC_START = 1604448000  # endpoint introduced 2020-11-04; earlier values are explicitly unavailable
-SOURCE_PRIORITY = ('gate', 'bybit', 'binance', 'okx')
+SOURCE_PRIORITY = ('gate', 'bybit', 'binance', 'okx', 'bitget')
 PERSISTENT_LIMIT = max(2, min(6, int(os.getenv('STRICT_SOURCE_DISABLE_AFTER', '2'))))
 BACKFILL_PAGES = max(1, min(8, int(os.getenv('STRICT_CORE_DERIVATIVE_PAGES_PER_TICK', '4'))))
 

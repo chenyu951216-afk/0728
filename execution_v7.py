@@ -198,8 +198,10 @@ def plan_from_policy(strategy: str, direction: str, live: float, m15: list[dict[
     }
 
 
-def _slice_to(rows: list[dict[str, Any]], timestamps: list[int], ts: int, max_bars: int) -> list[dict[str, Any]]:
-    idx = bisect.bisect_right(timestamps, ts)
+def _slice_closed_to(rows: list[dict[str, Any]], timestamps: list[int], timeframe_seconds: int, decision_close_ts: int, max_bars: int) -> list[dict[str, Any]]:
+    """Return only candles that had closed when the historical order was decided."""
+    last_open_allowed = int(decision_close_ts) - int(timeframe_seconds)
+    idx = bisect.bisect_right(timestamps, last_open_allowed)
     return rows[max(0, idx - max_bars):idx]
 
 
@@ -209,8 +211,9 @@ def simulate_policy(data: dict[str, Any], opp: dict[str, Any], strategy: str, di
     if i is None or i < 100:
         return {'filled': False, 'pnl_r': 0.0}
     past15 = bars[max(0, i - 500):i + 1]
-    past30 = _slice_to(data['m30'], data['ts30'], int(opp['ts']), 300)
-    past1h = _slice_to(data['h1'], data['ts1h'], int(opp['ts']), 300)
+    decision_close = int(opp['ts']) + 900
+    past30 = _slice_closed_to(data['m30'], data['ts30'], 1800, decision_close, 300)
+    past1h = _slice_closed_to(data['h1'], data['ts1h'], 3600, decision_close, 300)
     live = f(bars[i]['c'])
     plan = plan_from_policy(strategy, direction, live, past15, policy, past30, past1h)
     entry, stop0 = f(plan['entry']), f(plan['stop'])

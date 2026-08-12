@@ -1,8 +1,14 @@
-# ETH Adaptive AI 9.2
+# ETH Adaptive AI 10.0
 
 ETH 短線（非超短線）策略研究與訊號系統。系統會從 2020 年起做 point-in-time 歷史重播，在牛市、熊市、盤整、壓縮／擴張與反轉等不同 regime 中，分別演化 Signal 與 Entry/SL/TP；沒有通過未觸碰樣本驗證的結果不會進入正式訊號。
 
-## 9.2 學習流程
+## 10.0 分層 Point-in-Time 學習流程
+
+10.0 將學習拆成一條不可跳階的因果流程：先完成 ETH 1D/4H 宏觀趨勢，再學習 1H/30M 市場結構，最後才開放 15M/5M 短線入場。候選策略在 development history 內依 `MACRO_REGIME -> MARKET_STRUCTURE -> SHORT_HORIZON_SIGNAL` 順序演化，每個 lineage 的 sealed OOS 僅能開封一次。
+
+價格來源會依預先固定的 Gate、Bybit、Binance、OKX、Bitget 優先序進行能力檢查與逐時點復原。來源不支援某段歷史時會切換下一來源，不會重複請求必然失敗的 API，也不會插值或拿現在的資料回填過去。
+
+部署 10.0 不需要新的必填環境變數；現有 `COINGLASS_API_KEY` 與 `COINGLASS_PLAN=STANDARD` 可直接沿用。舊版派生樣本與 Champion 會在一次性特徵 schema 遷移後重建，原始市場與衍生品資料不會刪除。
 
 1. 只用當下已收線的多交易所 K 線與當時已存在的衍生品資料建立特徵。
 2. 每個策略方向是「族群入口」，不是固定的 14 個模型：族群會演化 feature set、regime scope、recency、模型複雜度與正則化。
@@ -39,6 +45,7 @@ python server_entry.py
 - `/api/v18/final-status`：最終認證、Champion 與 regime portfolio
 - `/api/v20/historical-evolution`：各 lineage 最近一次 holdout、genome 數與等待新資料狀態
 - `/api/v21/coinglass-standard`：Standard capability、資料範圍與可用性
+- `/api/v22/pipeline`：八階段真實總進度、目前 blocker、來源證據與 no-lookahead contract
 
 部署時請使用持久磁碟並將 `DATABASE_PATH` 指向該磁碟。不要提交 `.env`、API key、Discord token 或 SQLite 資料庫。
 
