@@ -215,21 +215,29 @@ def _earliest(asset: str, tf: str, source: str | None=None) -> int | None:
 async def backfill_one(asset: str, tf: str) -> dict[str, Any]:
     earliest = _earliest(asset, tf); end_ts = earliest - TIMEFRAME_SECONDS[tf] if earliest else int(time.time())
     if end_ts <= START_TS: return {'done': True, 'asset': asset, 'tf': tf, 'added': 0}
-    added = 0; source_used = 'gate'; error = None
+    added = 0; source_used = None; errors: list[str] = []; skipped: list[str] = []
     for _ in range(BACKFILL_PAGES_PER_TICK):
-        try: rows = await hub.fetch_history('gate', asset, tf, end_ts=end_ts, limit=1200)
-        except Exception as exc: rows = []; error = str(exc)
-        if not rows:
-            for fallback in ('bybit', 'binance', 'okx'):
-                try:
-                    rows = await hub.fetch_history(fallback, asset, tf, end_ts=end_ts, limit=1000)
-                    if rows: source_used = fallback; break
-                except Exception as exc: error = f"{error or ''}; {fallback}:{exc}"
-            if not rows: break
-        dict_rows = [x.dict() for x in rows if x.ts >= START_TS]; added += insert_bars(source_used, asset, tf, dict_rows); oldest = min((x.ts for x in rows))
+        rows = []
+        for source in hub.history_source_order(tf, end_ts):
+            try:
+                rows = await hub.fetch_history(source, asset, tf, end_ts=end_ts, limit=1000)
+                if rows:
+                    source_used = source
+                    break
+                skipped.append(f'{source}:empty')
+            except Exception as exc:
+                msg = str(exc)
+                if 'retention window' in msg or 'too long ago' in msg.lower():
+                    skipped.append(f'{source}:{msg}')
+                else:
+                    errors.append(f'{source}:{msg}')
+        if not rows: break
+        dict_rows = [x.dict() for x in rows if x.ts >= START_TS]
+        added += insert_bars(str(source_used), asset, tf, dict_rows)
+        oldest = min((x.ts for x in rows))
         if oldest <= START_TS or oldest >= end_ts: break
         end_ts = oldest - TIMEFRAME_SECONDS[tf]
-    con = db(); con.execute('INSERT OR REPLACE INTO source_ledger(ts,source,feature_group,ok,quality,detail) VALUES(?,?,?,?,?,?)', (int(time.time()), source_used, f'backfill:{asset}:{tf}', int(added > 0), 100.0 if added else 0.0, json.dumps({'added': added, 'error': error}, ensure_ascii=False))); con.commit(); con.close(); return {'done': end_ts <= START_TS, 'asset': asset, 'tf': tf, 'added': added, 'source': source_used, 'error': error}
+    con = db(); con.execute('INSERT OR REPLACE INTO source_ledger(ts,source,feature_group,ok,quality,detail) VALUES(?,?,?,?,?,?)', (int(time.time()), str(source_used or 'multi-source'), f'backfill:{asset}:{tf}', int(added > 0), 100.0 if added else 0.0, json.dumps({'added': added, 'errors': errors[-5:], 'capability_skips': skipped[-8:]}, ensure_ascii=False))); con.commit(); con.close(); return {'done': end_ts <= START_TS, 'asset': asset, 'tf': tf, 'added': added, 'source': source_used, 'errors': errors[-5:], 'capability_skips': skipped[-8:]}
 
 def _best_source(asset: str, tf: str) -> str | None:
     con = db(); rows = con.execute('SELECT source,COUNT(*) n,MIN(ts) mn,MAX(ts) mx FROM market_bars WHERE asset=? AND tf=? GROUP BY source ORDER BY n DESC', (asset, tf)).fetchall(); con.close()

@@ -17,8 +17,8 @@ import adaptive_v5 as base
 import v5_runtime
 import v8_evolution as evo
 
-VERSION = '9.2.0-20260812'
-GENOME_SCHEMA = 3
+VERSION = '10.0.0-20260812'
+GENOME_SCHEMA = 4
 GENERATIONS = max(3, min(12, int(os.getenv('SIGNAL_EVOLUTION_GENERATIONS', '7'))))
 POPULATION = max(16, min(96, int(os.getenv('SIGNAL_EVOLUTION_POPULATION', '36'))))
 ELITES = max(3, min(16, int(os.getenv('SIGNAL_EVOLUTION_ELITES', '6'))))
@@ -35,7 +35,16 @@ REGIME_SCOPES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ('RANGE', ('RANGE_LOW_VOL', 'RANGE_HIGH_VOL', 'TRANSITION')),
     ('REVERSAL', ('CAPITULATION', 'REBOUND', 'TRANSITION', 'BULL_PULLBACK', 'BEAR_RALLY')),
 )
-FEATURE_MODES = ('all', 'price_action', 'momentum_structure', 'flow_structure', 'lean')
+ALL_PHASES = ('PULLBACK', 'COMPRESSION', 'EXPANSION', 'IMPULSE', 'BALANCE', 'TRANSITION')
+PHASE_SCOPES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ('ALL', ALL_PHASES),
+    ('TREND_STRUCTURE', ('PULLBACK', 'IMPULSE', 'TRANSITION')),
+    ('BREAKOUT_STRUCTURE', ('COMPRESSION', 'EXPANSION', 'IMPULSE')),
+    ('RANGE_STRUCTURE', ('BALANCE', 'COMPRESSION', 'TRANSITION')),
+    ('REVERSAL_STRUCTURE', ('PULLBACK', 'BALANCE', 'TRANSITION')),
+)
+FINAL_FEATURE_MODES = ('all', 'price_action', 'momentum_structure', 'flow_structure', 'lean')
+FEATURE_MODES = ('macro_context', 'structure_context') + FINAL_FEATURE_MODES
 
 
 @dataclass
@@ -58,6 +67,8 @@ class EvolutionEvaluation:
     candidates_evaluated: int
     regime_scope: str
     allowed_regimes: list[str]
+    structure_scope: str
+    allowed_phases: list[str]
     holdout_ev_bootstrap_05: float
     signals_per_day: float
     genome_id: str
@@ -71,7 +82,7 @@ class EvolutionEvaluation:
 def _fingerprint(g: dict[str, Any]) -> str:
     # Identity is the actual phenotype. Generation labels and a previous id must not
     # make byte-identical candidates look novel and silently multiply-test the data.
-    payload = json.dumps({k: v for k, v in g.items() if k not in ('id', 'generation')}, sort_keys=True, separators=(',', ':'))
+    payload = json.dumps({k: v for k, v in g.items() if k not in ('id', 'generation', 'evolution_stage')}, sort_keys=True, separators=(',', ':'))
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
@@ -80,38 +91,66 @@ def _rng(strategy: str, direction: str, evidence_key: int = 0) -> random.Random:
     return random.Random(seed)
 
 
+def _evolution_stage(generation: int) -> str:
+    if generation <= 1:
+        return 'MACRO_REGIME'
+    if generation <= 3:
+        return 'MARKET_STRUCTURE'
+    return 'SHORT_HORIZON_SIGNAL'
+
+
 def _candidate(rng: random.Random, generation: int, parent: dict[str, Any] | None = None) -> dict[str, Any]:
+    stage = _evolution_stage(generation)
     if parent is None:
-        mode = rng.choice(FEATURE_MODES)
         scope_name, scope = rng.choice(REGIME_SCOPES)
+        phase_name, phases = ('ALL', ALL_PHASES) if stage == 'MACRO_REGIME' else rng.choice(PHASE_SCOPES)
+        mode = 'macro_context' if stage == 'MACRO_REGIME' else 'structure_context' if stage == 'MARKET_STRUCTURE' else rng.choice(FINAL_FEATURE_MODES)
         g = {
             'feature_mode': mode,
             'scope_name': scope_name,
             'regimes': list(scope),
+            'phase_scope_name': phase_name,
+            'phases': list(phases),
             'half_life_days': rng.choice((270, 365, 540, 730, 1095, 1460)),
-            'learning_rate': rng.choice((.022, .028, .034, .040, .046, .052)),
-            'max_iter': rng.choice((170, 200, 230, 260, 300)),
-            'max_leaf_nodes': rng.choice((7, 9, 13, 17, 23)),
-            'min_samples_leaf': rng.choice((22, 30, 40, 52, 68)),
+            # Macro selection starts from one fixed learner shape. Later stages may
+            # change structure and short-horizon capacity, so micro parameters cannot
+            # accidentally decide which market regime survives the first stage.
+            'learning_rate': .034,
+            'max_iter': 230,
+            'max_leaf_nodes': 13,
+            'min_samples_leaf': 40,
             'l2_regularization': rng.choice((1.2, 1.8, 2.5, 3.4, 4.5)),
             'generation': generation,
         }
     else:
         g = dict(parent)
         g['regimes'] = list(parent['regimes'])
+        g['phases'] = list(parent.get('phases') or ALL_PHASES)
+        g['phase_scope_name'] = str(parent.get('phase_scope_name') or 'ALL')
         g['generation'] = generation
-        mut = rng.randint(1, 3)
-        keys = rng.sample(('feature_mode', 'scope', 'half_life_days', 'learning_rate', 'max_iter', 'max_leaf_nodes', 'min_samples_leaf', 'l2_regularization'), mut)
+        if stage == 'MACRO_REGIME':
+            available = ('scope', 'half_life_days', 'l2_regularization')
+        elif stage == 'MARKET_STRUCTURE':
+            g['feature_mode'] = 'structure_context'
+            available = ('phase_scope', 'min_samples_leaf', 'max_leaf_nodes')
+        else:
+            if g.get('feature_mode') in ('macro_context', 'structure_context'):
+                g['feature_mode'] = rng.choice(FINAL_FEATURE_MODES)
+            available = ('feature_mode', 'half_life_days', 'learning_rate', 'max_iter', 'max_leaf_nodes', 'min_samples_leaf', 'l2_regularization')
+        keys = rng.sample(available, rng.randint(1, min(3, len(available))))
         for key in keys:
-            if key == 'feature_mode': g['feature_mode'] = rng.choice(FEATURE_MODES)
+            if key == 'feature_mode': g['feature_mode'] = rng.choice(FINAL_FEATURE_MODES)
             elif key == 'scope':
                 name, scope = rng.choice(REGIME_SCOPES); g['scope_name'] = name; g['regimes'] = list(scope)
+            elif key == 'phase_scope':
+                name, phases = rng.choice(PHASE_SCOPES); g['phase_scope_name'] = name; g['phases'] = list(phases)
             elif key == 'half_life_days': g[key] = rng.choice((270, 365, 540, 730, 1095, 1460))
             elif key == 'learning_rate': g[key] = rng.choice((.022, .028, .034, .040, .046, .052))
             elif key == 'max_iter': g[key] = rng.choice((170, 200, 230, 260, 300))
             elif key == 'max_leaf_nodes': g[key] = rng.choice((7, 9, 13, 17, 23))
             elif key == 'min_samples_leaf': g[key] = rng.choice((22, 30, 40, 52, 68))
             elif key == 'l2_regularization': g[key] = rng.choice((1.2, 1.8, 2.5, 3.4, 4.5))
+    g['evolution_stage'] = _evolution_stage(generation)
     g['id'] = f"evo{generation}_{_fingerprint(g)}"
     return g
 
@@ -139,7 +178,8 @@ def _model(g: dict[str, Any], seed: int) -> HistGradientBoostingClassifier:
 
 def _scope(rows: list[dict[str, Any]], g: dict[str, Any]) -> list[dict[str, Any]]:
     allowed = set(g['regimes'])
-    return [r for r in rows if str(r['regime']) in allowed]
+    phases = set(g.get('phases') or ALL_PHASES)
+    return [r for r in rows if str(r['regime']) in allowed and str(r['phase']) in phases]
 
 
 def _ensure_run_table(store: Any) -> None:
@@ -278,12 +318,27 @@ def _development_score(rows: list[dict[str, Any]], g: dict[str, Any], fee: float
     ]
     if not allowed_regimes:
         return None
+    phase_metrics: dict[str, dict[str, float]] = {}
+    for phase in sorted({str(row['phase']) for row in selected_all}):
+        subset = [row for row in selected_all if str(row['phase']) == phase]
+        if len(subset) >= 12:
+            phase_metrics[phase] = base._stats(subset, fee)
+    allowed_phases = [
+        phase for phase, stats in phase_metrics.items()
+        if stats['n'] >= 14 and stats['ev'] >= .01 and stats['pf'] >= 1.02
+    ] or [
+        phase for phase, stats in phase_metrics.items()
+        if stats['n'] >= 24 and stats['ev'] > 0
+    ]
+    if not allowed_phases:
+        return None
     score = overall['ev'] * 4.5 + math.log(max(overall['pf'], 1e-6)) * .35 + stability * .30 + profitable * .20 - dd * .004 + min(worst, .10) + min(len(allowed_regimes), 4) * .015
     return {
         'score': score, 'ev': overall['ev'], 'pf': overall['pf'], 'win': overall['win'],
         'n': len(selected_all), 'dd': dd, 'stability': stability, 'profitable_folds': profitable,
         'worst_fold_ev': worst, 'threshold': round(statistics.median(thresholds), 2), 'folds': fold_stats,
         'regime_metrics': regime_metrics, 'allowed_regimes': allowed_regimes,
+        'phase_metrics': phase_metrics, 'allowed_phases': allowed_phases,
     }
 
 
@@ -309,7 +364,12 @@ def _evaluate_incumbent(model: Any, meta: dict[str, Any], rows: list[dict[str, A
     if model is None or not rows:
         return None
     allowed = set(meta.get('allowed_regimes') or [])
-    scoped = [row for row in rows if not allowed or str(row['regime']) in allowed]
+    phases = set(meta.get('allowed_phases') or [])
+    scoped = [
+        row for row in rows
+        if (not allowed or str(row['regime']) in allowed)
+        and (not phases or str(row['phase']) in phases)
+    ]
     if not scoped:
         return None
     try:
@@ -367,6 +427,10 @@ class HistoricalEvolutionLearner(evo.GenomeEvolutionLearner):
         prior_genome = (previous or {}).get('winner_genome')
         if isinstance(prior_genome, dict):
             parent = {k: v for k, v in prior_genome.items() if k not in ('id', 'generation')}
+            parent['feature_mode'] = 'macro_context'
+            parent['phases'] = list(ALL_PHASES)
+            parent['phase_scope_name'] = 'ALL'
+            parent['evolution_stage'] = 'MACRO_REGIME'
             parent['generation'] = 0; parent['id'] = f"evo0_{_fingerprint(parent)}"
             population.append(parent)
             while len(population) < max(ELITES * 3, POPULATION // 2):
@@ -383,12 +447,16 @@ class HistoricalEvolutionLearner(evo.GenomeEvolutionLearner):
                 seen.add(fp); evaluated += 1
                 result = _development_score(development, g, self.fee_r, 91000 + generation * 1000 + ci * 7)
                 if result is not None: scored.append((float(result['score']), g, result))
+            # A completed stage is frozen into its children, then the preceding-stage
+            # candidates leave the pool. This makes the search truly macro -> structure
+            # -> short-horizon instead of selecting every degree of freedom at once.
+            carry = elites if generation == 0 or _evolution_stage(generation) == _evolution_stage(generation - 1) else []
             pool: dict[str, tuple[float, dict[str, Any], dict[str, Any]]] = {
-                _fingerprint(item[1]): item for item in (elites + scored)
+                _fingerprint(item[1]): item for item in (carry + scored)
             }
             elites = sorted(pool.values(), key=lambda z: z[0], reverse=True)[:ELITES]
             if elites:
-                best_history.append({'generation': generation, 'genome_id': elites[0][1]['id'], 'scope': elites[0][1]['scope_name'], 'new_candidates': len(scored), **elites[0][2]})
+                best_history.append({'generation': generation, 'evolution_stage': _evolution_stage(generation), 'genome_id': elites[0][1]['id'], 'macro_scope': elites[0][1]['scope_name'], 'structure_scope': elites[0][1]['phase_scope_name'], 'new_candidates': len(scored), **elites[0][2]})
             if generation == GENERATIONS - 1 or not elites: break
             population = []
             while len(population) < POPULATION:
@@ -408,7 +476,8 @@ class HistoricalEvolutionLearner(evo.GenomeEvolutionLearner):
             return None
         _, winner, dev = elites[0]
         fixed_regimes = list(dev.get('allowed_regimes') or winner['regimes'])
-        deployment_genome = {**winner, 'regimes': fixed_regimes}
+        fixed_phases = list(dev.get('allowed_phases') or winner.get('phases') or ALL_PHASES)
+        deployment_genome = {**winner, 'regimes': fixed_regimes, 'phases': fixed_phases}
         deployment_genome['id'] = f"evo{int(winner['generation'])}_{_fingerprint(deployment_genome)}"
         scoped_dev = _scope(development, deployment_genome); scoped_holdout = _scope(holdout, deployment_genome)
         idx = _indices(winner)
@@ -500,7 +569,9 @@ class HistoricalEvolutionLearner(evo.GenomeEvolutionLearner):
             'feature_names': evo._feature_names(str(winner['feature_mode'])), 'feature_count': len(idx),
             'params': {k: winner[k] for k in ('learning_rate','max_iter','max_leaf_nodes','min_samples_leaf','l2_regularization')},
             'recency_half_life_days': winner['half_life_days'], 'regime_scope': winner['scope_name'],
-            'allowed_regimes': fixed_regimes, 'development_regime_metrics': dev.get('regime_metrics') or {}, 'threshold': threshold,
+            'structure_scope': winner['phase_scope_name'], 'hierarchical_search_order': ['MACRO_REGIME', 'MARKET_STRUCTURE', 'SHORT_HORIZON_SIGNAL'],
+            'allowed_regimes': fixed_regimes, 'allowed_phases': fixed_phases,
+            'development_regime_metrics': dev.get('regime_metrics') or {}, 'development_phase_metrics': dev.get('phase_metrics') or {}, 'threshold': threshold,
             'profit_factor': stats['pf'], 'expectancy_r': stats['ev'], 'test_win': stats['win'],
             'selected_n': len(selected), 'max_drawdown_r': dd, 'signals_per_day': freq,
             'brier': brier, 'stability': dev['stability'], 'clustered_ev_bootstrap_05': ci05,
@@ -530,6 +601,7 @@ class HistoricalEvolutionLearner(evo.GenomeEvolutionLearner):
             threshold=threshold, brier=brier, max_drawdown_r=dd, stability=dev['stability'], promoted=promote,
             reason=reason, generation=int(winner['generation']), candidates_evaluated=evaluated,
             regime_scope=str(winner['scope_name']), allowed_regimes=fixed_regimes,
+            structure_scope=str(winner['phase_scope_name']), allowed_phases=fixed_phases,
             holdout_ev_bootstrap_05=ci05, signals_per_day=freq, genome_id=deployment_genome['id'],
             absolute_guard_passed=absolute_guard, champion_comparison_passed=comparison_passed,
             holdout_start_ts=int(holdout[0]['ts']), holdout_end_ts=int(holdout[-1]['ts']),
@@ -568,8 +640,10 @@ def evolution_status(core: Any) -> dict[str, Any]:
             'strategy': str(row[0]), 'direction': str(row[1]), 'created_at': int(row[2]),
             'development_end_ts': int(row[3] or 0), 'holdout_start_ts': int(row[4] or 0),
             'holdout_end_ts': int(row[5] or 0), 'status': status,
-            'genome_id': genome.get('id'), 'scope': genome.get('scope_name'),
+            'genome_id': genome.get('id'), 'macro_scope': genome.get('scope_name'),
+            'structure_scope': genome.get('phase_scope_name'),
             'allowed_regimes': list(metrics.get('allowed_regimes') or []),
+            'allowed_phases': list(metrics.get('allowed_phases') or []),
             'candidates_evaluated': int(metrics.get('candidates_evaluated') or 0),
             'selected_n': int(metrics.get('selected_n') or 0),
             'profit_factor': metrics.get('profit_factor'), 'expectancy_r': metrics.get('expectancy_r'),
@@ -595,6 +669,8 @@ def install(core: Any) -> None:
         'minimum_new_untouched_decisions': MIN_UNTOUCHED_HOLDOUT,
         'minimum_selected_holdout_trades': MIN_HOLDOUT_SELECTED,
         'fixed_strategy_direction_pairs_are_population_entrypoints': True,
+        'hierarchical_search_order': ['MACRO_REGIME', 'MARKET_STRUCTURE', 'SHORT_HORIZON_SIGNAL'],
+        'macro_and_structure_are_frozen_before_sealed_holdout': True,
         'same_failed_holdout_can_be_retried': False,
         'incumbent_compared_on_same_new_holdout': True,
         'rule': 'all mutation/selection occurs inside development history; final chronological holdout is sealed until winner is fixed',

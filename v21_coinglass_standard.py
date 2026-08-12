@@ -14,7 +14,7 @@ import v13_replay_cursor_integrity as cursor_guard
 import v15_data_resilience as resilience
 
 
-VERSION = '9.2.0-20260812'
+VERSION = '10.0.0-20260812'
 FEATURE_SCHEMA = 7
 FEATURE_SCHEMA_KEY = 'coinglass_standard_feature_schema'
 STATE_KEY = 'coinglass_standard_v1'

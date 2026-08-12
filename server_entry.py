@@ -37,34 +37,28 @@ STARTUP_ERROR_TYPE: str | None = None
 STARTUP_ERROR_TEXT: str | None = None
 
 
-def _prepare_92_generation(production: Any) -> None:
-    """One-time migration: make old certification due under the 9.2 learner.
+def _prepare_100_generation(production: Any) -> None:
+    """Record the 10.0 migration without overriding the replay safety gate.
 
-    Historical/raw/derived samples are preserved. Only the previous certification
-    timestamp is invalidated once so the new sealed-holdout evolution actually runs
-    immediately after upgrade instead of inheriting a stale fixed-pair rejection result.
+    The hierarchical pipeline owns feature-schema invalidation and will rebuild only
+    derived samples.  This bootstrap hook must never make certification ready while
+    the new point-in-time replay is still incomplete.
     """
     try:
         core = production.core
         version = str(production.signal_evolution.VERSION)
-        marker_key = 'v21_historical_evolution_migration'
+        marker_key = 'v22_hierarchical_evolution_migration'
         if core.get_state(marker_key, '') == version:
             return
-        state = core.get_state('v18_final_system_state', None)
-        state = dict(state) if isinstance(state, dict) else {}
-        state['last_cert_completed_at'] = 0
-        state['status'] = 'READY_FOR_SIGNAL_CERTIFICATION'
-        state['reason'] = '9.2 lineage-aware Signal evolution requires one fresh certification pass after schema-7 replay'
-        core.set_state('v18_final_system_state', state)
         core.set_state(marker_key, version)
-        LOG.info('9.2 evolution migration armed: preserved raw history; invalidated certification timestamp only')
+        LOG.info('10.0 hierarchical evolution migration recorded; replay safety gate remains authoritative')
     except Exception:
-        LOG.exception('9.2 evolution migration preparation failed; production remains fail-closed')
+        LOG.exception('10.0 evolution migration preparation failed; production remains fail-closed')
 
 
 def _import_production_blocking() -> tuple[Any, Any]:
     production = importlib.import_module('server_v19')
-    _prepare_92_generation(production)
+    _prepare_100_generation(production)
     return production, production.app
 
 
@@ -109,7 +103,7 @@ async def _bootstrap_lifespan(_: FastAPI):
             LOG.exception('production lifespan shutdown failed')
 
 
-bootstrap = FastAPI(title='ETH Adaptive AI bootstrap', version='9.2.0-bootstrap', lifespan=_bootstrap_lifespan)
+bootstrap = FastAPI(title='ETH Adaptive AI bootstrap', version='10.0.0-bootstrap', lifespan=_bootstrap_lifespan)
 
 
 @bootstrap.get('/healthz')
@@ -132,7 +126,7 @@ def readyz() -> JSONResponse:
 @bootstrap.get('/', response_class=HTMLResponse)
 def bootstrap_dashboard() -> str:
     err = STARTUP_ERROR_TEXT or '—'
-    return f'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ETH Adaptive AI</title><style>body{{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#071426;color:#e8f0ff;margin:0;padding:28px}}.card{{max-width:760px;margin:40px auto;padding:24px;border:1px solid #29466d;border-radius:20px;background:#0b1b31}}h1{{margin-top:0}}.warn{{color:#ffd36e}}.bad{{color:#ff7187}}code{{word-break:break-word}}</style></head><body><div class="card"><h1>ETH Adaptive AI 9.2.0</h1><h2 class="{'bad' if STARTUP_ERROR_TYPE else 'warn'}">Bootstrap HTTP ONLINE · {STARTUP_STATUS}</h2><p>Listening: <code>0.0.0.0:{PORT}</code></p><p>正式 Runtime 完成前，新訊號與交易維持 fail-closed。</p><p>錯誤：<code>{err}</code></p></div></body></html>'''
+    return f'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ETH Adaptive AI</title><style>body{{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#071426;color:#e8f0ff;margin:0;padding:28px}}.card{{max-width:760px;margin:40px auto;padding:24px;border:1px solid #29466d;border-radius:20px;background:#0b1b31}}h1{{margin-top:0}}.warn{{color:#ffd36e}}.bad{{color:#ff7187}}code{{word-break:break-word}}</style></head><body><div class="card"><h1>ETH Adaptive AI 10.0.0</h1><h2 class="{'bad' if STARTUP_ERROR_TYPE else 'warn'}">Bootstrap HTTP ONLINE · {STARTUP_STATUS}</h2><p>Listening: <code>0.0.0.0:{PORT}</code></p><p>正式 Runtime 完成前，新訊號與交易維持 fail-closed。</p><p>錯誤：<code>{err}</code></p></div></body></html>'''
 
 
 @bootstrap.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'])

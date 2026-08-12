@@ -42,11 +42,27 @@ MOMENTUM_FEATURES = {
     'atr_pct', 'atr_rank', 'adx', 'rsi', 'volume_z', 'range_z',
     'btc_ret_4', 'btc_ret_16', 'eth_btc_rel',
 }
-CONTEXT_FEATURES = {'hour_sin', 'hour_cos', 'dow_sin', 'dow_cos', 'macro_code', 'phase_code'}
+HIERARCHY_FEATURES = {
+    'daily_direction', 'h4_direction', 'h1_direction', 'daily_adx_norm',
+    'h4_adx_norm', 'h1_adx_norm', 'daily_slope_norm', 'h4_slope_norm',
+    'h1_slope_norm', 'macro_alignment', 'structure_alignment',
+    'macro_volatility_rank', 'macro_atr_pct',
+}
+CONTEXT_FEATURES = {'hour_sin', 'hour_cos', 'dow_sin', 'dow_cos', 'macro_code', 'phase_code'} | HIERARCHY_FEATURES
 
 
 def _feature_names(mode: str) -> list[str]:
     all_names = list(base.FEATURE_NAMES)
+    if mode == 'macro_context':
+        keep = HIERARCHY_FEATURES | {'macro_code', 'btc_ret_16', 'eth_btc_rel', 'atr_rank'}
+        return [x for x in all_names if x in keep]
+    if mode == 'structure_context':
+        keep = HIERARCHY_FEATURES | STRUCTURE_FEATURES | {
+            'macro_code', 'phase_code', 'ret_16', 'ema20_gap', 'ema50_gap',
+            'ema20_slope', 'atr_pct', 'atr_rank', 'adx', 'rsi', 'btc_ret_16',
+            'eth_btc_rel',
+        }
+        return [x for x in all_names if x in keep]
     if mode == 'all':
         return all_names
     if mode == 'price_action':

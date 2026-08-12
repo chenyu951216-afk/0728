@@ -22,7 +22,7 @@ SCHEMA_KEY = 'final_data_resilience_schema'
 STATE_KEY = 'final_data_resilience_v1'
 GAP_KEY = 'final_price_gap_registry_v1'
 
-PRICE_PRIORITY = ('gate', 'bybit', 'binance', 'okx')
+PRICE_PRIORITY = ('gate', 'bybit', 'binance', 'okx', 'bitget')
 OI_PRIORITY = ('bybit_oi', 'gate_stats', 'cg_oi')
 FUNDING_PRIORITY = ('funding_binance', 'funding_bybit')
 COINGLASS_STANDARD_ENRICHMENT = ('cg_oi_funding', 'cg_taker', 'cg_crowd', 'cg_top_position')
@@ -372,12 +372,12 @@ def strict_extras(core: Any, history: Any, decision_ts: int) -> dict[str, float]
 def canonical_bars(core: Any, asset: str, tf: str) -> list[dict[str, Any]]:
     con = core.db()
     try:
-        sig = con.execute("SELECT COUNT(*),COALESCE(MAX(ts),0) FROM market_bars WHERE asset=? AND tf=? AND source IN ('gate','bybit','binance','okx')",
+        sig = con.execute("SELECT COUNT(*),COALESCE(MAX(ts),0) FROM market_bars WHERE asset=? AND tf=? AND source IN ('gate','bybit','binance','okx','bitget')",
                           (asset, tf)).fetchone()
         key = (id(core), asset, tf, int(sig[0] or 0), int(sig[1] or 0))
         if key in _CANON_CACHE:
             return _CANON_CACHE[key]
-        rows = con.execute("SELECT source,ts,o,h,l,c,v,qv FROM market_bars WHERE asset=? AND tf=? AND source IN ('gate','bybit','binance','okx') ORDER BY ts",
+        rows = con.execute("SELECT source,ts,o,h,l,c,v,qv FROM market_bars WHERE asset=? AND tf=? AND source IN ('gate','bybit','binance','okx','bitget') ORDER BY ts",
                            (asset, tf)).fetchall()
     finally:
         con.close()
@@ -569,7 +569,7 @@ def install(core: Any) -> None:
         lr['replay_price_blocker']=core.state.get('strict_replay_gap_blocker') or {}
         db=lr.get('derivative_backfill') or {}; lr['provider_notices']=list(db.get('nonblocking_provider_notices') or []); lr['derivative_errors']=list(db.get('errors') or [])
         if repair and repair.get('status')=='PENDING_REPAIR':
-            lr['phase']='WAITING_PRICE_GAP_REPAIR'; lr['blocker']=f"repairing {target['asset']} {target['tf']} gap across Gate/Bybit/Binance/OKX; no interpolation"
+            lr['phase']='WAITING_PRICE_GAP_REPAIR'; lr['blocker']=f"repairing {target['asset']} {target['tf']} gap across Gate/Bybit/Binance/OKX/Bitget; no interpolation"
         elif repair and repair.get('status')=='REPAIRED':
             lr['phase']='PRICE_GAP_REPAIRED_RESUMING'; lr['blocker']=None
         elif repair and repair.get('status')=='QUARANTINED_UNRECOVERABLE':

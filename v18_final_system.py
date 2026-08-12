@@ -20,7 +20,7 @@ import v16_runtime_integrity as runtime_integrity
 import v17_certification_orchestrator as cert17
 
 
-VERSION = '9.2.0-20260812'
+VERSION = '10.0.0-20260812'
 SCHEMA = 1
 STATE_KEY = 'v18_final_system_state'
 AUDIT_KEY = 'v18_final_dataset_audit'
@@ -695,7 +695,7 @@ async def _final_boot_notice(core: Any) -> None:
         f"Replay `{float((view.get('replay') or {}).get('percent') or 0):.2f}%`｜Samples `{int((view.get('samples') or {}).get('rows') or 0):,}`\n"
         'Final Authority 已啟用：SQLite truth recovery、no-lookahead replay、Signal genome OOS、Execution untouched audit、live drift/post-exit learning、單一路徑 fail-closed。'
     )
-    if await v5_runtime.robust_send_discord(core, '✅ ETH Adaptive AI 9.2 Final Authority 已啟動', body, 0x3498DB):
+    if await v5_runtime.robust_send_discord(core, '✅ ETH Adaptive AI 10.0 Hierarchical Final Authority 已啟動', body, 0x3498DB):
         core.set_state('v18_boot_notice_version', VERSION)
 
 
@@ -768,7 +768,7 @@ def install(core: Any) -> None:
         'profit_guarantee': False,
     }
     core.state['runtime_version'] = VERSION
-    core.app.version = '9.2.0'
+    core.app.version = '10.0.0'
     _authoritative_view(core)
 
     if not any(getattr(r, 'path', None) == '/api/v18/final-status' for r in core.app.router.routes):

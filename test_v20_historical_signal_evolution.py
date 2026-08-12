@@ -28,6 +28,8 @@ def _development_result(*_args, **_kwargs):
         'worst_fold_ev': .10, 'threshold': .50, 'folds': [],
         'regime_metrics': {'BULL_MARKUP': {'n': 150, 'ev': .20, 'pf': 2.0}},
         'allowed_regimes': ['BULL_MARKUP'],
+        'phase_metrics': {'IMPULSE': {'n': 150, 'ev': .20, 'pf': 2.0}},
+        'allowed_phases': ['IMPULSE'],
     }
 
 
@@ -49,6 +51,22 @@ def test_genome_identity_ignores_generation_labels():
     left = {'feature_mode': 'lean', 'generation': 1, 'id': 'old', 'regimes': ['BULL_MARKUP']}
     right = {'feature_mode': 'lean', 'generation': 9, 'id': 'new', 'regimes': ['BULL_MARKUP']}
     assert evolution._fingerprint(left) == evolution._fingerprint(right)
+
+
+def test_evolution_search_is_hierarchical_not_joint_random_search():
+    rng = evolution._rng('TREND_PULLBACK', 'LONG', 123)
+    macro = evolution._candidate(rng, 0)
+    assert macro['evolution_stage'] == 'MACRO_REGIME'
+    assert macro['feature_mode'] == 'macro_context'
+    assert macro['phase_scope_name'] == 'ALL'
+
+    structure = evolution._candidate(rng, 2, macro)
+    assert structure['evolution_stage'] == 'MARKET_STRUCTURE'
+    assert structure['feature_mode'] == 'structure_context'
+
+    short = evolution._candidate(rng, 4, structure)
+    assert short['evolution_stage'] == 'SHORT_HORIZON_SIGNAL'
+    assert short['feature_mode'] in evolution.FINAL_FEATURE_MODES
 
 
 def test_failed_or_passed_holdout_is_not_reopened_and_incumbent_uses_next_block():
