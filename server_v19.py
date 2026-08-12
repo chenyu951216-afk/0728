@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import threading
 import time
@@ -18,9 +20,6 @@ from v20_historical_signal_evolution import install as install_signal_evolution
 LOG = logging.getLogger('eth-adaptive.startup')
 core = base.core
 
-# Restore/audit the proven runtime first, then replace only the final Signal learner
-# authority with the sealed-holdout multi-generation evolution engine. Historical
-# replay labels and the later Execution Entry/SL/TP evolution remain unchanged.
 install_final_system(core)
 install_operational_guard(core)
 install_signal_evolution(core)
@@ -32,6 +31,51 @@ core.app.version = '9.1.0'
 
 app = core.app
 PORT = core.PORT
+
+# A failed generation must not be re-run hourly on byte-identical evidence. Repeatedly
+# peeking at the same OOS until something passes is itself meta-overfitting. A new
+# generation becomes due only after enough newly matured labels arrive (or the normal
+# long recertification interval with genuinely newer data), unless explicitly forced.
+def _evolution_certification_due(core_obj, snap: dict, force: bool) -> bool:
+    if force:
+        return True
+    state = final_system._final_state(core_obj)
+    now = int(time.time())
+    total = int(snap.get('learning_samples') or 0)
+    max_ts = int(snap.get('sample_max_ts') or 0)
+    last_total = int(state.get('last_cert_sample_total') or 0)
+    last_max = int(state.get('last_cert_sample_max_ts') or 0)
+    last_at = int(state.get('last_cert_completed_at') or 0)
+    if last_at <= 0 and total > 0:
+        return True
+    if total - last_total >= final_system.RECERTIFY_MIN_NEW_SAMPLES:
+        return True
+    if max_ts > last_max and now - last_at >= final_system.RECERTIFY_SECONDS:
+        return True
+    return False
+
+final_system._certification_due = _evolution_certification_due
+
+# Deduplicate Discord certification summaries by semantic result rather than timestamp.
+# A new generation/result still notifies; the same 0/14 result does not repeat hourly.
+_original_send_pending_notice = final_system._send_pending_notice
+async def _dedup_send_pending_notice(core_obj):
+    notice = core_obj.state.get('v18_pending_notice')
+    if not isinstance(notice, dict):
+        return
+    semantic = {k: notice.get(k) for k in (
+        'status', 'reason', 'signal_promoted', 'signal_rejected',
+        'execution_promoted', 'execution_rejected', 'signal_champions', 'execution_champions',
+    )}
+    fp = hashlib.sha256(json.dumps(semantic, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:24]
+    if core_obj.get_state('v20_last_cert_notice_fingerprint', '') == fp:
+        return
+    await _original_send_pending_notice(core_obj)
+    sent = int(core_obj.get_state('v18_last_notice_at', 0) or 0)
+    if sent >= int(notice.get('at') or 0):
+        core_obj.set_state('v20_last_cert_notice_fingerprint', fp)
+
+final_system._send_pending_notice = _dedup_send_pending_notice
 
 _PREFLIGHT_READY = threading.Event()
 _PREFLIGHT_FAILED = threading.Event()
