@@ -10,8 +10,9 @@ from typing import Any
 import adaptive_v5 as signal
 import execution_v7 as execution
 import v8_evolution
+import runtime_identity
 
-WALKFORWARD_VERSION = '10.1.0-20260813'
+WALKFORWARD_VERSION = runtime_identity.RUNTIME_VERSION
 WALKFORWARD_SCHEMA = 2
 MIN_WF_OPPORTUNITIES = max(110, int(os.getenv('EXECUTION_WF_MIN_OPPORTUNITIES', '126')))
 MIN_WF_FOLDS = max(3, int(os.getenv('EXECUTION_WF_MIN_FOLDS', '3')))
@@ -303,7 +304,7 @@ def install(core: Any) -> None:
     execution.optimize_all = optimize_all_walkforward
     v8_evolution.EVOLUTION_VERSION = WALKFORWARD_VERSION
     core.state['runtime_version'] = WALKFORWARD_VERSION
-    core.app.version = '7.2.0'
+    runtime_identity.stamp(core)
     core.state['execution_validation_method'] = 'EXPANDING_WALK_FORWARD_AGGREGATED_UNTOUCHED_AUDITS'
     if not any(getattr(r, 'path', None) == '/api/v8/execution-walkforward' for r in core.app.router.routes):
         @core.app.get('/api/v8/execution-walkforward')

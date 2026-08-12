@@ -11,9 +11,10 @@ import v9_final
 import v9_live_parity
 import v9_readiness
 import v9_training_store
+import runtime_identity
 
 
-GATE_VERSION = '8.0.3-20260809'
+GATE_VERSION = runtime_identity.RUNTIME_VERSION
 STATE_KEY = 'strict_cg_gate_v1'
 ENRICHMENT_FAILURE_LIMIT = max(2, min(6, int(os.getenv('STRICT_CG_ENRICHMENT_DISABLE_AFTER', '2'))))
 CORE_METRIC = 'oi_usd'
@@ -274,7 +275,7 @@ def install(core: Any) -> None:
         'global_auth_failure_uses_explicit_missingness_native_fallback': True,
         'rule': 'optional CoinGlass enrichment cannot permanently deadlock strict replay; missing features remain explicit and consistent',
     }
-    core.app.version = '8.0.3'
+    runtime_identity.stamp(core)
 
     if not any(getattr(r, 'path', None) == '/api/v9/derivative-gate' for r in core.app.router.routes):
         @core.app.get('/api/v9/derivative-gate')

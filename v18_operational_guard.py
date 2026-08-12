@@ -10,6 +10,7 @@ import v13_replay_cursor_integrity as cursor_guard
 import v15_data_resilience as resilience
 import v17_certification_orchestrator as cert17
 import v18_final_system as final
+import runtime_identity
 
 
 VERSION = final.VERSION
@@ -195,6 +196,6 @@ def install(core: Any) -> None:
     strict['final_authority']['missing_frozen_source_contract_can_be_silently_reused'] = False
     strict['final_authority']['source_provenance_rebuild_deletes_raw_market'] = False
     core.state['runtime_version'] = VERSION
-    core.app.version = '9.0.0'
+    runtime_identity.stamp(core)
 
     authoritative_view(core, True)

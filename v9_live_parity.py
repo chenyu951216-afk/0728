@@ -6,9 +6,10 @@ from typing import Any
 
 import v9_final
 import v9_readiness
+import runtime_identity
 
 
-PARITY_VERSION = '8.0.2-20260809'
+PARITY_VERSION = runtime_identity.RUNTIME_VERSION
 MAX_DECISION_AGE_SECONDS = max(30, min(300, int(os.getenv('STRICT_LIVE_DECISION_MAX_AGE_SECONDS', '120'))))
 
 
@@ -78,7 +79,7 @@ def install(core: Any) -> None:
     }
     core.state['runtime_version'] = PARITY_VERSION
     core.state['strict_replay']['runtime'] = PARITY_VERSION
-    core.app.version = '8.0.2'
+    runtime_identity.stamp(core)
 
     if not any(getattr(r, 'path', None) == '/api/v9/live-parity' for r in core.app.router.routes):
         @core.app.get('/api/v9/live-parity')

@@ -4,9 +4,10 @@ from typing import Any
 
 import v5_runtime
 import v9_final
+import runtime_identity
 
 
-READINESS_VERSION = '8.0.1-20260809'
+READINESS_VERSION = runtime_identity.RUNTIME_VERSION
 
 
 def _coinglass_ready_through(core: Any) -> int | None:
@@ -74,7 +75,7 @@ def install(core: Any) -> None:
     core.state['runtime_version'] = READINESS_VERSION
     core.state.setdefault('strict_replay', {})['derivative_watermark_required_when_coinglass_enabled'] = True
     core.state['strict_replay']['runtime'] = READINESS_VERSION
-    core.app.version = '8.0.1'
+    runtime_identity.stamp(core)
 
     if not any(getattr(r, 'path', None) == '/api/v9/readiness' for r in core.app.router.routes):
         @core.app.get('/api/v9/readiness')

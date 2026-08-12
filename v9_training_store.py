@@ -6,9 +6,10 @@ import os
 from typing import Any
 
 import adaptive_v5 as signal
+import runtime_identity
 
 
-STORE_VERSION = '8.0.2-20260809'
+STORE_VERSION = runtime_identity.RUNTIME_VERSION
 MODEL_MAX_ROWS = max(24000, min(90000, int(os.getenv('STRICT_MODEL_MAX_ROWS', '60000'))))
 MODEL_RECENT_ROWS = max(6000, min(MODEL_MAX_ROWS // 2, int(os.getenv('STRICT_MODEL_RECENT_ROWS', '20000'))))
 
@@ -129,7 +130,7 @@ def install(core: Any) -> None:
     }
     core.state['runtime_version'] = STORE_VERSION
     core.state['strict_replay']['runtime'] = STORE_VERSION
-    core.app.version = '8.0.2'
+    runtime_identity.stamp(core)
 
     if not any(getattr(r, 'path', None) == '/api/v9/training-store' for r in core.app.router.routes):
         @core.app.get('/api/v9/training-store')

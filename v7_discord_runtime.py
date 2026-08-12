@@ -8,14 +8,17 @@ from typing import Any
 import httpx
 
 import v5_runtime
+import runtime_identity
 
 
 async def robust_send(core: Any, title: str, body: str, color: int = 6000633) -> bool:
     webhook = os.getenv('DISCORD_WEBHOOK_URL', '') or getattr(core, 'DISCORD_WEBHOOK_URL', '')
     bot = os.getenv('DISCORD_BOT_TOKEN', '') or getattr(core, 'DISCORD_BOT_TOKEN', '')
     channel = os.getenv('DISCORD_CHANNEL_ID', '') or getattr(core, 'DISCORD_CHANNEL_ID', '')
-    version = str(core.state.get('runtime_version') or getattr(core.app, 'version', 'v7'))
-    payload = {'embeds': [{'title': title[:256], 'description': body[:4000], 'color': color, 'timestamp': datetime.now(timezone.utc).isoformat(), 'footer': {'text': f'ETH Adaptive AI {version} | research/paper only'}}]}
+    version = runtime_identity.RUNTIME_VERSION
+    title = runtime_identity.public_text(title)
+    body = runtime_identity.public_text(body)
+    payload = {'embeds': [{'title': title[:256], 'description': body[:4000], 'color': color, 'timestamp': datetime.now(timezone.utc).isoformat(), 'footer': {'text': f'{runtime_identity.PRODUCT_NAME} {version} | research/paper only'}}]}
     errors = []
     async with httpx.AsyncClient(timeout=15) as client:
         if webhook:

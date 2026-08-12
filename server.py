@@ -4,6 +4,7 @@ import uvicorn
 from fastapi.responses import HTMLResponse
 
 import app as core
+import runtime_identity
 from v5_async_runtime import install_async
 from v5_runtime import install as install_v5
 from v7_timesafe_learning import install as install_timesafe_learning
@@ -113,9 +114,8 @@ install_data_resilience(core)
 # safe manual training and one composed live signal entrance.
 install_runtime_integrity(core)
 
-RUNTIME_VERSION = '8.4.0-20260810'
-core.state['runtime_version'] = RUNTIME_VERSION
-core.state.setdefault('strict_replay', {})['runtime'] = RUNTIME_VERSION
+RUNTIME_VERSION = runtime_identity.RUNTIME_VERSION
+runtime_identity.stamp(core)
 core.state['strict_replay']['learning_scheduler'] = {
     'price_backfill_nonexclusive': True,
     'price_backfill_failure_isolated': True,
@@ -136,7 +136,7 @@ core.state['strict_replay']['learning_scheduler'] = {
     'single_composed_live_signal_entrance': True,
     'legacy_manual_training_bypass_closed': True,
 }
-core.app.version = '8.4.0'
+core.app.version = runtime_identity.API_VERSION
 
 app = core.app
 PORT = core.PORT
@@ -148,7 +148,7 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 def dashboard() -> str:
     html = Path('dashboard_v721.html').read_text(encoding='utf-8')
     html = (
-        html.replace('ETH Adaptive AI 7.2.1', 'ETH Adaptive AI 8.4.0 Runtime Integrity')
+        html.replace('ETH Adaptive AI 7.2.1', f'{runtime_identity.PRODUCT_NAME} {runtime_identity.DISPLAY_VERSION}')
         .replace(
             'Walk-Forward Evolution · Storage Identity Guard · Subsystem-Isolated Fail-Closed',
             'Clean Dataset · Matured-Label Strict Replay · Multi-Exchange Gap Recovery · OOS Signal + Walk-Forward Execution',
@@ -194,7 +194,7 @@ def dashboard() -> str:
     )
     html = html.replace(
         "row('最新市場',tm(rp.latest_market_ts));$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:'';",
-        "row('最新市場',tm(rp.latest_market_ts))+row('合法 Label 最前端',tm(rp.legal_frontier_ts))+row('Label 成熟緩衝',rp.expected_label_maturity_buffer_seconds!=null?n(rp.expected_label_maturity_buffer_seconds/3600,2)+' 小時':'—')+row('待處理成熟決策',rp.pending_eligible_decisions??'—')+row('Learning phase',lr.phase||lr.runtime_status||'—')+row('本輪新增樣本',lr.v5_samples_added??0)+row('總學習樣本',((lr.certification_pipeline||{}).learning_samples??'—'))+row('正式認證階段',(lr.certification_pipeline||{}).stage||'—')+row('Signal / Execution Champion',`${(lr.certification_pipeline||{}).signal_champions??0} / ${(lr.certification_pipeline||{}).execution_champions??0}`)+row('價格補資料目標',lr.price_backfill_target?(lr.price_backfill_target.asset+' '+lr.price_backfill_target.tf):'無')+row('Core source freeze',(lr.derivative_backfill||{}).core_frozen?'已鎖定':'等待核心來源完成')+row('Frozen OI',((lr.derivative_backfill||{}).frozen_core_oi||[]).join(', ')||'模型全代遮罩')+row('Frozen funding',((lr.derivative_backfill||{}).frozen_core_funding||[]).join(', ')||'模型全代遮罩')+row('Frozen enrichment',((lr.derivative_backfill||{}).frozen_enrichment||[]).join(', ')||'模型全代遮罩')+row('Price gap',((lr.price_gap_repair||{}).status)||(((lr.price_gap_summary||{}).counts||{}).PENDING_REPAIR?'修復中':'無'));let pb=lr.replay_price_blocker||{},pipe=lr.certification_pipeline||{};$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:pb.blocked?`<div class=\"notice y\"><b>Strict Replay 正在修復真實價格缺口：</b>${esc(pb.reason||'price gap')}<br>時間：${tm(pb.at_ts)}</div>`:lr.blocker?`<div class=\"notice y\"><b>目前學習狀態：</b>${esc(lr.blocker)}</div>`:pipe.stage?`<div class=\"notice ${pipe.stage==='FULLY_OPERATIONAL'?'g':'y'}\"><b>${esc(pipe.stage)}</b><br>${esc(pipe.reason||'')}</div>`:'';if($('derivSources'))$('derivSources').textContent=JSON.stringify({derivatives:lr.derivative_backfill||{},resilience:lr.data_resilience||{},gaps:lr.price_gap_summary||{},certification:pipe,provider_notices:lr.provider_notices||[]},null,2);",
+        "row('最新市場',tm(rp.latest_market_ts))+row('合法 Label 最前端',tm(rp.legal_frontier_ts))+row('Label 成熟緩衝',rp.expected_label_maturity_buffer_seconds!=null?n(rp.expected_label_maturity_buffer_seconds/3600,2)+' 小時':'—')+row('待處理成熟決策',rp.pending_eligible_decisions??'—')+row('Learning phase',lr.phase||lr.runtime_status||'—')+row('本輪新增樣本',lr.causal_samples_added??lr.v5_samples_added??0)+row('總學習樣本',((lr.certification_pipeline||{}).learning_samples??'—'))+row('正式認證階段',(lr.certification_pipeline||{}).stage||'—')+row('Signal / Execution Champion',`${(lr.certification_pipeline||{}).signal_champions??0} / ${(lr.certification_pipeline||{}).execution_champions??0}`)+row('價格補資料目標',lr.price_backfill_target?(lr.price_backfill_target.asset+' '+lr.price_backfill_target.tf):'無')+row('Core source freeze',(lr.derivative_backfill||{}).core_frozen?'已鎖定':'等待核心來源完成')+row('Frozen OI',((lr.derivative_backfill||{}).frozen_core_oi||[]).join(', ')||'模型全代遮罩')+row('Frozen funding',((lr.derivative_backfill||{}).frozen_core_funding||[]).join(', ')||'模型全代遮罩')+row('Frozen enrichment',((lr.derivative_backfill||{}).frozen_enrichment||[]).join(', ')||'模型全代遮罩')+row('Price gap',((lr.price_gap_repair||{}).status)||(((lr.price_gap_summary||{}).counts||{}).PENDING_REPAIR?'修復中':'無'));let pb=lr.replay_price_blocker||{},pipe=lr.certification_pipeline||{};$('learnError').innerHTML=lr.error?`<div class=\"notice r\"><b>Learning error：</b>${esc(lr.error)}</div>`:pb.blocked?`<div class=\"notice y\"><b>Strict Replay 正在修復真實價格缺口：</b>${esc(pb.reason||'price gap')}<br>時間：${tm(pb.at_ts)}</div>`:lr.blocker?`<div class=\"notice y\"><b>目前學習狀態：</b>${esc(lr.blocker)}</div>`:pipe.stage?`<div class=\"notice ${pipe.stage==='FULLY_OPERATIONAL'?'g':'y'}\"><b>${esc(pipe.stage)}</b><br>${esc(pipe.reason||'')}</div>`:'';if($('derivSources'))$('derivSources').textContent=JSON.stringify({derivatives:lr.derivative_backfill||{},resilience:lr.data_resilience||{},gaps:lr.price_gap_summary||{},certification:pipe,provider_notices:lr.provider_notices||[]},null,2);",
     )
     html = html.replace(
         "let active=(sigs||[]).find(s=>s.status==='OPEN'||s.status==='PLANNED');renderSignal(active);",

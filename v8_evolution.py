@@ -17,9 +17,10 @@ from sklearn.metrics import brier_score_loss, log_loss
 import adaptive_v5 as base
 import execution_v7
 import v5_runtime
+import runtime_identity
 import v7_runtime
 
-EVOLUTION_VERSION = '7.1.0-20260809'
+EVOLUTION_VERSION = runtime_identity.RUNTIME_VERSION
 GENOME_SCHEMA = 1
 LIVE_REAUDIT_BATCH = max(3, int(os.getenv('EVOLUTION_LIVE_REAUDIT_BATCH', '5')))
 EXECUTION_RANDOM_CANDIDATES = max(48, min(160, int(os.getenv('EVOLUTION_EXECUTION_CANDIDATES', '96'))))
@@ -540,7 +541,7 @@ def install(core: Any) -> None:
     # All existing Discord lifecycle messages automatically gain model versions, OOS evidence and risk sizing.
     v7_runtime._summary = _evolution_summary
     core.state['runtime_version'] = EVOLUTION_VERSION
-    core.app.version = '7.1.0'
+    runtime_identity.stamp(core)
 
     if not any(getattr(r, 'path', None) == '/api/v8/evolution' for r in core.app.router.routes):
         @core.app.get('/api/v8/evolution')

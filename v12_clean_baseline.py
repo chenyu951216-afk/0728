@@ -6,8 +6,9 @@ from typing import Any
 
 import execution_v7
 import v5_runtime
+import runtime_identity
 
-VERSION = '8.2.0-20260809'
+VERSION = runtime_identity.RUNTIME_VERSION
 BASELINE_ID = 'final-clean-baseline-20260809-v1'
 STATE_KEY = 'final_dataset_baseline_v1'
 
@@ -149,7 +150,7 @@ def install(core: Any) -> None:
         'new_signal_requires_clean_baseline': True,
     }
     core.state['runtime_version'] = VERSION
-    core.app.version = '8.2.0'
+    runtime_identity.stamp(core)
 
     if not any(getattr(r, 'path', None) == '/api/v12/baseline' for r in core.app.router.routes):
         @core.app.get('/api/v12/baseline')

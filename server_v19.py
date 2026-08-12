@@ -9,6 +9,7 @@ import time
 import uvicorn
 from fastapi.responses import HTMLResponse
 
+import runtime_identity
 import server_v17 as base
 import v18_final_system as final_system
 import v18_operational_guard as operational_guard
@@ -30,10 +31,8 @@ install_signal_evolution(core)
 install_coinglass_standard(core)
 install_hierarchical_pipeline(core)
 
-RUNTIME_VERSION = '10.1.0-20260813'
-core.state['runtime_version'] = RUNTIME_VERSION
-core.state.setdefault('strict_replay', {})['runtime'] = RUNTIME_VERSION
-core.app.version = '10.1.0'
+RUNTIME_VERSION = runtime_identity.RUNTIME_VERSION
+runtime_identity.stamp(core)
 
 app = core.app
 PORT = core.PORT
@@ -146,7 +145,7 @@ def _preflight_worker() -> None:
             'completed_at': int(time.time()), 'result': result,
         }
         _PREFLIGHT_READY.set()
-        LOG.info('10.1.0 startup provenance preflight complete: %s', result.get('status'))
+        LOG.info('%s startup provenance preflight complete: %s', RUNTIME_VERSION, result.get('status'))
     except Exception as exc:
         _PREFLIGHT_FAILED.set()
         core.state['startup_preflight'] = {
@@ -154,7 +153,7 @@ def _preflight_worker() -> None:
             'failed_at': int(time.time()), 'error': f'{type(exc).__name__}: {exc}',
             'reason': 'web remains online; certification and new orders remain fail-closed until this is repaired',
         }
-        LOG.exception('10.1.0 startup provenance preflight failed')
+        LOG.exception('%s startup provenance preflight failed', RUNTIME_VERSION)
 
 
 threading.Thread(target=_preflight_worker, name='source-provenance-preflight', daemon=True).start()
@@ -165,8 +164,8 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 @app.get('/', response_class=HTMLResponse)
 def dashboard() -> str:
     html = base.dashboard()
-    html = html.replace('ETH Adaptive AI 8.4.1 Certification Orchestrator', 'ETH Adaptive AI 10.1 Causal Full-History Learning')
-    html = html.replace('ETH Adaptive AI 8.4', 'ETH Adaptive AI 10.1')
+    html = html.replace('ETH Adaptive AI 8.4.1 Certification Orchestrator', f'{runtime_identity.PRODUCT_NAME} {runtime_identity.DISPLAY_VERSION}')
+    html = html.replace('ETH Adaptive AI 8.4', f'{runtime_identity.PRODUCT_NAME} {runtime_identity.DISPLAY_VERSION}')
     startup_card = '''
 <section class="card"><h2>🧭 Hierarchical Point-in-Time Learning / Final Authority</h2>
 <div id="startup19" class="notice">讀取八階段學習狀態…</div>
@@ -181,7 +180,7 @@ async function refreshStartup19(){
   const root=document.getElementById('startup19'), detail=document.getElementById('startup19detail');
   if(!root)return;
   try{
-    const s=await fetch('/api/v22/pipeline',{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()});
+    const s=await fetch('/api/latest/pipeline',{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()});
     const p=s.startup_preflight||{}, ok=s.operational===true, stages=s.stages||[];
     root.className='notice '+(ok?'g':(p.status==='FAILED'?'r':'y'));
     root.innerHTML='<b>'+String(s.final_status||'LEARNING')+'</b>｜整體 '+Number(s.overall_percent||0).toFixed(2)+'%<br>目前：'+String(s.active_stage||'初始化')+

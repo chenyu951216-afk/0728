@@ -7,6 +7,7 @@ import v7_runtime
 import v8_evolution
 import v9_final
 import v10_final_integrity as fin
+import runtime_identity
 
 
 VERSION=fin.VERSION
@@ -21,7 +22,7 @@ async def final_boot_notice(core: Any)->None:
     funding=', '.join(state.get('frozen_core_funding') or []) or '等待下載完成後鎖定'
     ok=await v5_runtime.robust_send_discord(
         core,
-        '🛡️ ETH Adaptive AI 8.1 Final Replay Integrity 已啟動',
+        f'🛡️ {runtime_identity.PRODUCT_NAME} {runtime_identity.DISPLAY_VERSION} Replay Integrity 已啟動',
         '歷史模擬：時間 T 只能使用 T 當時已收線且已處理完成的資料；30m/1H/4H/1D 未收線 K 禁止進入特徵。\n'
         'Signal label：15m 決策先鎖死，再從 decision close 之後用連續 5m K 逐根揭露成交/SL/TP；成交 5m 棒不會倒推先前 high/low 當獲利。\n'
         f'資料來源：本代 OI `{oi}`｜Funding `{funding}`；來源集合在 replay 前凍結，半途新增 provider 禁止污染同一代。\n'

@@ -16,9 +16,10 @@ import v9_final
 import v9_live_parity
 import v9_readiness
 import v9_training_store
+import runtime_identity
 
 
-VERSION = '8.0.4-20260809'
+VERSION = runtime_identity.RUNTIME_VERSION
 STATE_KEY = 'strict_multisource_derivatives_v1'
 INTERVAL = 4 * 3600
 PERSISTENT_FAILURE_LIMIT = max(2, min(6, int(os.getenv('STRICT_SOURCE_DISABLE_AFTER', '2'))))
@@ -429,7 +430,7 @@ def install(core: Any) -> None:
         'transient_failure_blocks_and_retries_without_source_downgrade': True,
         'future_data_backfill_forbidden': True,
     }
-    core.app.version = '8.0.4'
+    runtime_identity.stamp(core)
 
     if not any(getattr(r, 'path', None) == '/api/v9/multisource-derivatives' for r in core.app.router.routes):
         @core.app.get('/api/v9/multisource-derivatives')

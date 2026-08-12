@@ -4,15 +4,14 @@ import uvicorn
 from fastapi.responses import HTMLResponse
 
 import server as base
+import runtime_identity
 from v17_certification_orchestrator import install as install_certification_orchestrator
 
 core = base.core
 install_certification_orchestrator(core)
 
-RUNTIME_VERSION = '8.4.1-20260810'
-core.state['runtime_version'] = RUNTIME_VERSION
-core.state.setdefault('strict_replay', {})['runtime'] = RUNTIME_VERSION
-core.app.version = '8.4.1'
+RUNTIME_VERSION = runtime_identity.RUNTIME_VERSION
+runtime_identity.stamp(core)
 
 app = core.app
 PORT = core.PORT
@@ -25,7 +24,7 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 @app.get('/', response_class=HTMLResponse)
 def dashboard() -> str:
     html = base.dashboard()
-    html = html.replace('ETH Adaptive AI 8.4.0 Runtime Integrity', 'ETH Adaptive AI 8.4.1 Certification Orchestrator')
+    html = html.replace('ETH Adaptive AI 8.4.0 Runtime Integrity', f'{runtime_identity.PRODUCT_NAME} {runtime_identity.DISPLAY_VERSION}')
     html = html.replace(
         'Clean Dataset · Matured-Label Strict Replay · Multi-Exchange Gap Recovery · OOS Signal + Walk-Forward Execution',
         'Clean Dataset Audit · Matured-Label Strict Replay · Explicit Signal Certification · Walk-Forward Execution',

@@ -20,6 +20,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 import httpx
 import uvicorn
+import runtime_identity
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from adaptive_engine import Learner, ModelStore, STRATEGIES, atr, bootstrap_progress, build_features, choose_strategy, detect_regime, ema, risk_plan
@@ -326,7 +327,7 @@ async def lifespan(_: FastAPI):
         try: await task
         except asyncio.CancelledError: pass
 
-app = FastAPI(title='ETH Adaptive Short-Term Engine', version='4.2.0', lifespan=lifespan)
+app = FastAPI(title=f'{runtime_identity.PRODUCT_NAME} Short-Term Engine', version=runtime_identity.API_VERSION, lifespan=lifespan)
 @app.get('/health')
 def health() -> dict[str, Any]: return {'ok': state['service'] == 'OK', 'service': state['service'], 'updated_at': state['updated_at'], 'error': state['error']}
 @app.get('/api/status')

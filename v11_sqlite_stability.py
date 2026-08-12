@@ -12,9 +12,10 @@ import v5_runtime
 import v7_runtime
 import v8_stability
 import v7_trade_monitor as trade_monitor
+import runtime_identity
 
 
-VERSION = '8.1.1-20260809'
+VERSION = runtime_identity.RUNTIME_VERSION
 BUSY_TIMEOUT_MS = 5000
 SAMPLE_COMMIT_EVERY = 14  # one complete strategy×direction decision snapshot
 DISCORD_POLL_TIMEOUT_SECONDS = 8
@@ -164,4 +165,4 @@ def install(core: Any) -> None:
         'single_modern_boot_notice_preserved': True,
     }
     core.state['runtime_version'] = VERSION
-    core.app.version = '8.1.1'
+    runtime_identity.stamp(core)

@@ -16,9 +16,10 @@ import v8_stability
 import v10_final_integrity as fin
 import v12_clean_baseline
 import v15_data_resilience as resilience
+import runtime_identity
 
 
-VERSION = '10.1.0-20260813'
+VERSION = runtime_identity.RUNTIME_VERSION
 REPLAY_PROGRESS_SCHEMA = 5
 MAINTENANCE_SECONDS = 15 * 60
 
@@ -310,7 +311,7 @@ async def _safe_scan(core: Any) -> dict[str, Any]:
             val = (created.get('payload') or {}).get('execution_validation') or {}
             await v5_runtime.robust_send_discord(
                 core,
-                '🆕 ETH 8.4 Point-in-Time 雙認證掛單',
+                f'🆕 ETH {runtime_identity.DISPLAY_VERSION} Point-in-Time 雙認證掛單',
                 v7_runtime._summary(core, created) +
                 f"\nAudit fills `{int(val.get('audit_fills') or 0)}`｜方法 `{val.get('method')}`\n"
                 '只允許最新剛收線的 15m 決策；不追價。',
@@ -399,8 +400,7 @@ def install(core: Any) -> None:
         'clean_dataset_and_fresh_close_gate_cannot_be_bypassed_by_scan': True,
         'runtime_patch_resets_historical_data': False,
     }
-    core.state['runtime_version'] = VERSION
-    core.app.version = '8.4.0'
+    runtime_identity.stamp(core)
 
     if not any(getattr(r, 'path', None) == '/api/v16/runtime-integrity' for r in core.app.router.routes):
         @core.app.get('/api/v16/runtime-integrity')

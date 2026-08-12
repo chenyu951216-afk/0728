@@ -17,13 +17,13 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install dependencies
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements.txt pytest
       - name: Compile all Python files
         run: python -m compileall -q .
       - name: Dashboard present
         run: test -s dashboard_v721.html && grep -q '系統子服務健康' dashboard_v721.html && grep -q 'Execution Champion' dashboard_v721.html
       - name: Unit tests
-        run: python -m unittest -v
+        run: python -m pytest -q
       - name: Runtime import smoke test
         env:
           DATABASE_PATH: /tmp/eth-runtime-integrity-ci.db
@@ -34,7 +34,7 @@ jobs:
         run: >-
           python -c "import os; p=os.environ['DATABASE_PATH']; [os.remove(x) for x in (p,p+'-wal',p+'-shm') if os.path.exists(x)];
           import server, execution_v7, v5_runtime, adaptive_v5, v7_runtime, v7_learning_guard, v8_evolution, v9_final, v9_readiness, v10_final_integrity, v11_sqlite_stability, v12_clean_baseline, v13_replay_cursor_integrity, v14_operational_throughput, v15_data_resilience, v16_runtime_integrity;
-          assert server.app.version == '8.4.0'; assert server.core.state.get('runtime_version') == '8.4.0-20260810';
+          assert server.app.version == '10.2.0'; assert server.core.state.get('runtime_version') == '10.2.0-20260813';
           assert server.core.state.get('risk_monitor_mode') == 'GATE_PUBLIC_TRADES_ORDERED'; assert server.core.state.get('stability_mode') == 'SUBSYSTEM_ISOLATED_FAIL_CLOSED';
           s=server.core.state.get('strict_replay',{}); assert s.get('htf_close_time_required') is True; assert s.get('audit_can_mutate_policy') is False;
           assert s.get('training_store',{}).get('full_span_sampling') is True; assert s.get('live_parity',{}).get('canonical_derivative_features') is True;

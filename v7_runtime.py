@@ -13,8 +13,9 @@ import adaptive_v5 as signal
 import execution_v7 as execution
 import v5_async_runtime
 import v5_runtime
+import runtime_identity
 
-V7_VERSION = '7.0.0-20260809'
+V7_VERSION = runtime_identity.RUNTIME_VERSION
 MONITOR_SECONDS = max(5, int(os.getenv('POSITION_MONITOR_SECONDS', '10')))
 REENTRY_BASE_BARS = max(2, int(os.getenv('REENTRY_COOLDOWN_BARS', '6')))
 
@@ -224,7 +225,7 @@ async def learning_tick_v7(core: Any) -> None:
 
 async def maybe_boot_notice(core: Any) -> None:
     if core.get_state('discord_boot_version_v7') == V7_VERSION: return
-    ok = await v5_runtime.robust_send_discord(core, '✅ ETH Adaptive AI v7 已啟動', '已停用有洩漏風險的 v6 Execution Champion。v7 使用 point-in-time Signal OOF、獨立 validation/audit、10 秒級持倉監控、多週期結構止損、止損後 cooldown + 結構 reset，且實盤 execution 樣本不再污染 Signal Model。', 0x3498DB)
+    ok = await v5_runtime.robust_send_discord(core, f'✅ {runtime_identity.PRODUCT_NAME} {runtime_identity.DISPLAY_VERSION} 已啟動', '已停用有洩漏風險的舊版 Execution Champion。正式版使用 point-in-time Signal OOF、獨立 validation/audit、10 秒級持倉監控、多週期結構止損、止損後 cooldown + 結構 reset，且實盤 execution 樣本不再污染 Signal Model。', 0x3498DB)
     if ok: core.set_state('discord_boot_version_v7', V7_VERSION)
 
 
@@ -261,7 +262,7 @@ def install(core: Any) -> None:
     async def scan_wrapper() -> dict[str, Any]: return await scan_v7(core)
     async def scan_worker_wrapper() -> None: await scan_worker_v7(core)
     async def learning_tick_wrapper() -> None: await learning_tick_v7(core)
-    core.scan = scan_wrapper; core.scan_worker = scan_worker_wrapper; core.learning_tick = learning_tick_wrapper; core.app.version = '7.0.0'; core.state['runtime_version'] = V7_VERSION
+    core.scan = scan_wrapper; core.scan_worker = scan_worker_wrapper; core.learning_tick = learning_tick_wrapper; runtime_identity.stamp(core)
     if not any(getattr(r, 'path', None) == '/api/v7/audit' for r in core.app.router.routes):
         @core.app.get('/api/v7/audit')
         def api_v7_audit() -> dict[str, Any]: return {'runtime': V7_VERSION, 'risk_monitor': core.state.get('risk_monitor'), 'execution_learning': core.state.get('execution_learning'), 'validation_rules': {'signal_history': 'purged chronological OOS', 'execution_history': 'point-in-time signal OOF -> dev -> validation -> untouched audit', 'live_monitor': f'Gate 10s/ticker every ~{MONITOR_SECONDS}s; Bybit current 1m fallback', 'reentry': f'{REENTRY_BASE_BARS} bars minimum after losing stop; longer after consecutive losses; new structure reset required', 'live_learning': 'separate live_execution_samples; never mixed into signal labels'}}

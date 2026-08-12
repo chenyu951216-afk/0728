@@ -15,8 +15,9 @@ import v9_readiness
 import v10_final_integrity as fin
 import v10_source_freeze as source_freeze
 import v13_replay_cursor_integrity as cursor_guard
+import runtime_identity
 
-VERSION = '8.3.0-20260810'
+VERSION = runtime_identity.RUNTIME_VERSION
 SCHEMA = 1
 SCHEMA_KEY = 'final_data_resilience_schema'
 STATE_KEY = 'final_data_resilience_v1'
@@ -588,7 +589,7 @@ def install(core: Any) -> None:
         'internal_price_gaps_auto_repaired_across_exchanges':True,'unrecoverable_price_gaps_never_interpolated':True,
         'unrecoverable_contaminated_windows_omitted_with_audit':True,'max_quarantined_gaps_for_certification':MAX_QUARANTINED_GAPS,
         'future_prices_never_used_as_features':True}
-    core.state['runtime_version']=VERSION; core.app.version='8.3.0'
+    runtime_identity.stamp(core)
 
     if not any(getattr(r,'path',None)=='/api/v15/resilience' for r in core.app.router.routes):
         @core.app.get('/api/v15/resilience')

@@ -182,7 +182,10 @@ def storage_status(core: Any, update_identity: bool = True) -> dict[str, Any]:
         'oldest_market_ts': oldest,
         'newest_market_ts': newest,
         'point_in_time_sample_schema': core.get_state('point_in_time_sample_schema', None),
-        'v5_sample_schema': core.get_state('v5_sample_schema', None),
+        'causal_sample_schema': core.get_state('point_in_time_sample_schema', None),
+        # Persistence-only compatibility marker. New UI/API consumers use
+        # causal_sample_schema and never present this as an active runtime version.
+        'legacy_compatibility_schema': core.get_state('v5_sample_schema', None),
         'db_error': db_error,
         'unexpected_reset': unexpected_reset,
         'possible_db_mismatch': possible_db_mismatch,

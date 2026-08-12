@@ -20,9 +20,10 @@ import v9_derivative_gate
 import v9_final
 import v9_live_parity
 import v9_readiness
+import runtime_identity
 
 
-VERSION = '8.1.0-20260809'
+VERSION = runtime_identity.RUNTIME_VERSION
 SAMPLE_SCHEMA = 6
 STATE_KEY = 'final_derivative_coverage_v2'
 INTERVAL = 4 * 3600
@@ -679,7 +680,7 @@ def install(core: Any) -> None:
         return original_train(c)
     v5_runtime.train_v5=guarded_train
 
-    core.state['runtime_version']=VERSION; core.app.version='8.1.0'
+    runtime_identity.stamp(core)
     strict=core.state.setdefault('strict_replay',{}); strict['runtime']=VERSION
     strict['final_integrity']={
         'sample_schema':SAMPLE_SCHEMA,'fixed_price_source_priority':list(SOURCE_PRIORITY),'future_row_count_source_selection_forbidden':True,
