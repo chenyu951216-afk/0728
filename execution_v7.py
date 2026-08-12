@@ -23,6 +23,7 @@ pivots = signal.pivots
 EXECUTION_SCHEMA = 2
 ALL_IN_COST_BPS = float(os.getenv('EXECUTION_ALL_IN_COST_BPS', '8.0'))
 MIN_STOP_PCT = float(os.getenv('EXECUTION_MIN_STOP_PCT', '0.0020'))
+MIN_STOP_COST_MULTIPLE = max(3.0, float(os.getenv('EXECUTION_MIN_STOP_COST_MULTIPLE', '5.0')))
 MAX_HOLD_BARS = max(12, int(os.getenv('EXECUTION_MAX_HOLD_BARS', '32')))
 MIN_AUDIT_FILLS = max(40, int(os.getenv('EXECUTION_MIN_AUDIT_FILLS', '50')))
 
@@ -108,6 +109,7 @@ def policy_candidates(strategy: str) -> list[dict[str, Any]]:
                         'schema': EXECUTION_SCHEMA,
                         'entry_atr': round(base * em, 4),
                         'stop_atr': sa,
+                        'noise_floor_mult': round(clamp(.62 + .30 * sa, .75, 1.35), 2),
                         'structure_mode': structure_mode,
                         'target_rr': list(rr),
                         'allocations': [20, 30, 30, 20],
@@ -161,7 +163,17 @@ def plan_from_policy(strategy: str, direction: str, live: float, m15: list[dict[
     else:
         entry = live - sign * off
     entry = min(entry, live - .02 * a15) if direction == 'LONG' else max(entry, live + .02 * a15)
-    min_dist = max(f(policy.get('stop_atr'), 1.0) * a15, entry * f(policy.get('min_stop_pct'), MIN_STOP_PCT))
+    recent = m15[-96:]
+    true_ranges = []
+    for i in range(1, len(recent)):
+        high, low, prev = f(recent[i]['h']), f(recent[i]['l']), f(recent[i - 1]['c'])
+        true_ranges.append(max(high - low, abs(high - prev), abs(low - prev)))
+    noise = statistics.median(true_ranges[-48:]) if true_ranges else a15
+    atr_floor = f(policy.get('stop_atr'), 1.0) * a15
+    noise_floor = f(policy.get('noise_floor_mult'), 1.0) * noise
+    percent_floor = entry * f(policy.get('min_stop_pct'), MIN_STOP_PCT)
+    cost_floor = entry * (f(policy.get('all_in_cost_bps'), ALL_IN_COST_BPS) / 10000.0) * MIN_STOP_COST_MULTIPLE
+    min_dist = max(atr_floor, noise_floor, percent_floor, cost_floor)
     levels = {
         '15m': _nearest_structure(m15, entry, direction, 2, .08 * a15),
         '30m': _nearest_structure(m30, entry, direction, 2, .10 * a30),
@@ -178,7 +190,10 @@ def plan_from_policy(strategy: str, direction: str, live: float, m15: list[dict[
     targets = [{'price': round(entry + sign * risk * rr, 2), 'rr': round(rr, 2), 'allocation': al} for rr, al in zip(rrs, alloc)]
     return {
         'entry': round(entry, 2), 'stop': round(stop, 2), 'risk': round(risk, 6), 'stop_pct': risk / max(entry, 1e-9), 'targets': targets,
-        'profile': {'mode': 'POINT_IN_TIME_OOS_EXECUTION_CHAMPION', **policy, 'structure_used': used_tf, 'structure_levels': {k: (round(v, 2) if v is not None else None) for k, v in levels.items()}},
+        'profile': {'mode': 'POINT_IN_TIME_OOS_EXECUTION_CHAMPION', **policy, 'structure_used': used_tf, 'structure_levels': {k: (round(v, 2) if v is not None else None) for k, v in levels.items()},
+                    'stop_floor_components': {'atr': atr_floor, 'recent_noise': noise_floor, 'minimum_percent': percent_floor, 'cost_multiple': cost_floor},
+                    'binding_stop_floor': max(('atr', atr_floor), ('recent_noise', noise_floor), ('minimum_percent', percent_floor), ('cost_multiple', cost_floor), key=lambda x: x[1])[0],
+                    'max_round_trip_cost_fraction_of_r': 1.0 / MIN_STOP_COST_MULTIPLE},
         'management': {'move_to_be_after_tp1': True, 'lock_after_tp2_r': f(policy.get('lock_after_tp2_r'), .55), 'lock_after_tp3_r': f(policy.get('lock_after_tp3_r'), 1.05), 'never_widen_stop': True, 'initial_plan_immutable': True},
     }
 

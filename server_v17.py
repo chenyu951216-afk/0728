@@ -33,7 +33,7 @@ def dashboard() -> str:
     cert_card = '''
 <section class="card"><h2>🧪 正式策略認證 / Derived Data 稽核</h2>
 <div id="cert17" class="notice">讀取正式認證狀態…</div>
-<details><summary>查看 14 個策略×方向認證結果</summary><pre id="cert17detail">—</pre></details></section>
+<details><summary>查看各策略族群／方向的最近一次進化結果</summary><pre id="cert17detail">—</pre></details></section>
 '''
     # Put the card inside the existing grid but do not touch existing script text.
     grid_close = '</div><div class="footer">'
@@ -55,7 +55,7 @@ async function refreshCert17(){
     el.innerHTML='<b>'+safe(c.status||'NOT_STARTED')+'</b><br>'+safe(c.reason||'等待正式認證')+
       '<br>Derived audit：<b>'+safe(a.status||'—')+'</b>｜samples '+Number(a.learning_samples||0).toLocaleString()+
       '｜decision timestamps '+Number(a.decision_timestamps||0).toLocaleString()+
-      '｜14-row partial '+Number(a.partial_decision_timestamps||0).toLocaleString()+
+      '｜incomplete decision groups '+Number(a.partial_decision_timestamps||0).toLocaleString()+
       '<br>Signal / Execution Champion：'+String(p.signal_champions??0)+' / '+String(p.execution_champions??0);
     const detail=document.getElementById('cert17detail');
     if(detail) detail.textContent=JSON.stringify({audit:a,certification:c,pipeline:p},null,2);

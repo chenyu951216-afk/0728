@@ -152,6 +152,74 @@ class DerivativeHistory:
             rows.append((_ts_seconds(x.get("time")), imbalance, 88.0, {"range_pct": 1}))
         return self._insert("coinglass", "book_imbalance", rows)
 
+    async def _backfill_coinglass_oi_weighted_funding(self, start_ts: int, end_ts: int) -> int:
+        data = await self._cg("/futures/funding-rate/oi-weight-history", {
+            "symbol": "ETH", "interval": "4h", "limit": 1000,
+            "start_time": start_ts * 1000, "end_time": end_ts * 1000,
+        })
+        rows = [
+            (_ts_seconds(x.get("time")), _f(x.get("close")), 94.0,
+             {"kind": "oi_weighted_funding"})
+            for x in (data or [])
+        ]
+        return self._insert("coinglass", "oi_weighted_funding", rows)
+
+    async def _backfill_coinglass_taker(self, start_ts: int, end_ts: int) -> int:
+        data = await self._cg("/futures/aggregated-taker-buy-sell-volume/history", {
+            "exchange_list": "Binance,OKX,Bybit,Gate", "symbol": "ETH",
+            "interval": "4h", "limit": 1000, "unit": "usd",
+            "start_time": start_ts * 1000, "end_time": end_ts * 1000,
+        })
+        rows = []
+        for x in data or []:
+            buy = _f(x.get("aggregated_buy_volume_usd"))
+            sell = _f(x.get("aggregated_sell_volume_usd"))
+            total = max(buy + sell, 0.0)
+            if total > 0:
+                rows.append((_ts_seconds(x.get("time")), (buy - sell) / total, 92.0,
+                             {"exchanges": "Binance,OKX,Bybit,Gate", "kind": "aggregated_futures_taker_imbalance"}))
+        return self._insert("coinglass", "taker_imbalance", rows)
+
+    async def _backfill_coinglass_crowd_ratio(self, start_ts: int, end_ts: int) -> int:
+        data = await self._cg("/futures/global-long-short-account-ratio/history", {
+            "exchange": "Binance", "symbol": "ETHUSDT", "interval": "4h", "limit": 1000,
+            "start_time": start_ts * 1000, "end_time": end_ts * 1000,
+        })
+        rows = []
+        for x in data or []:
+            long_pct = _f(x.get("global_account_long_percent"))
+            short_pct = _f(x.get("global_account_short_percent"))
+            total = long_pct + short_pct
+            if total > 0:
+                rows.append((_ts_seconds(x.get("time")), (long_pct - short_pct) / total, 90.0,
+                             {"exchange": "Binance", "kind": "global_account_skew"}))
+        return self._insert("coinglass", "crowd_skew", rows)
+
+    async def _backfill_coinglass_top_position_ratio(self, start_ts: int, end_ts: int) -> int:
+        data = await self._cg("/futures/top-long-short-position-ratio/history", {
+            "exchange": "Binance", "symbol": "ETHUSDT", "interval": "4h", "limit": 1000,
+            "start_time": start_ts * 1000, "end_time": end_ts * 1000,
+        })
+        rows = []
+        for x in data or []:
+            long_pct = _f(x.get("top_position_long_percent"))
+            short_pct = _f(x.get("top_position_short_percent"))
+            total = long_pct + short_pct
+            if total > 0:
+                rows.append((_ts_seconds(x.get("time")), (long_pct - short_pct) / total, 90.0,
+                             {"exchange": "Binance", "kind": "top_position_skew"}))
+        return self._insert("coinglass", "top_position_skew", rows)
+
+    async def coinglass_liquidation_heatmap(self, range_name: str = "3d") -> Any:
+        """Return a current heatmap snapshot for live risk gating only.
+
+        The endpoint is not a reconstructable point-in-time history. Callers must never
+        inject this response into historical samples or an execution backtest.
+        """
+        return await self._cg("/futures/liquidation/heatmap/model1", {
+            "exchange": "Binance", "symbol": "ETHUSDT", "range": range_name,
+        })
+
     async def _backfill_native_oi(self, hub: Any, end_ts: int) -> int:
         rows = await hub.fetch_bybit_oi_history("ETH", "4h", end_ts=end_ts, limit=200)
         return self._insert("bybit", "oi_coin", [(int(x["ts"]), _f(x["oi"]), 82.0, {}) for x in rows])
@@ -231,6 +299,10 @@ class DerivativeHistory:
         long_rows = self._latest_values("liq_long_usd", ts, 8 * 3600, 2)
         short_rows = self._latest_values("liq_short_usd", ts, 8 * 3600, 2)
         book_rows = self._latest_values("book_imbalance", ts, 8 * 3600, 2)
+        oi_funding_rows = self._latest_values("oi_weighted_funding", ts, 16 * 3600, 2)
+        taker_rows = self._latest_values("taker_imbalance", ts, 8 * 3600, 2)
+        crowd_rows = self._latest_values("crowd_skew", ts, 8 * 3600, 2)
+        top_position_rows = self._latest_values("top_position_skew", ts, 8 * 3600, 2)
 
         oi_change = 0.0
         if len(oi_rows) >= 2 and _f(oi_rows[-1]["value"]):
@@ -244,9 +316,10 @@ class DerivativeHistory:
         liq_intensity = math.log1p(total_liq) / 25.0 if total_liq else 0.0
         book = _f(book_rows[0]["value"]) if book_rows else 0.0
 
-        available_groups = sum((bool(oi_rows), bool(funding_rows), bool(long_rows and short_rows), bool(book_rows)))
-        coverage = available_groups / 4.0
-        quality_values = [float(x["quality"]) for group in (oi_rows[:1], funding_rows[:1], long_rows[:1], short_rows[:1], book_rows[:1]) for x in group]
+        extra_groups = (oi_funding_rows, taker_rows, crowd_rows, top_position_rows)
+        available_groups = sum((bool(oi_rows), bool(funding_rows), bool(long_rows and short_rows), bool(book_rows), *(bool(x) for x in extra_groups)))
+        coverage = available_groups / 8.0
+        quality_values = [float(x["quality"]) for group in (oi_rows[:1], funding_rows[:1], long_rows[:1], short_rows[:1], book_rows[:1], *(x[:1] for x in extra_groups)) for x in group]
         quality = statistics.mean(quality_values) if quality_values else 0.0
         return {
             "oi_change": oi_change,
@@ -254,10 +327,18 @@ class DerivativeHistory:
             "book_imbalance": book,
             "liquidation_imbalance": liq_imbalance,
             "liquidation_intensity": liq_intensity,
+            "oi_weighted_funding": _f(oi_funding_rows[0]["value"]) if oi_funding_rows else 0.0,
+            "taker_imbalance": _f(taker_rows[0]["value"]) if taker_rows else 0.0,
+            "crowd_skew": _f(crowd_rows[0]["value"]) if crowd_rows else 0.0,
+            "top_position_skew": _f(top_position_rows[0]["value"]) if top_position_rows else 0.0,
             "oi_available": float(bool(oi_rows)),
             "funding_available": float(bool(funding_rows)),
             "liquidation_available": float(bool(long_rows and short_rows)),
             "book_available": float(bool(book_rows)),
+            "oi_weighted_funding_available": float(bool(oi_funding_rows)),
+            "taker_available": float(bool(taker_rows)),
+            "crowd_available": float(bool(crowd_rows)),
+            "top_position_available": float(bool(top_position_rows)),
             "derivative_coverage": coverage,
             "derivative_quality": quality / 100.0,
         }

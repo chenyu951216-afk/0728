@@ -28,7 +28,10 @@ DERIVATIVE_FEATURES = {
     'spot_perp_basis_bps', 'funding', 'oi_change', 'book_imbalance',
     'liquidation_imbalance', 'liquidation_intensity', 'oi_available',
     'funding_available', 'liquidation_available', 'book_available',
-    'derivative_coverage', 'derivative_quality', 'source_agreement_bps',
+    'oi_weighted_funding', 'taker_imbalance', 'crowd_skew',
+    'top_position_skew', 'oi_weighted_funding_available', 'taker_available',
+    'crowd_available', 'top_position_available', 'derivative_coverage',
+    'derivative_quality', 'source_agreement_bps',
 }
 STRUCTURE_FEATURES = {
     'bos_up', 'bos_down', 'sweep_low', 'sweep_high', 'fvg_up', 'fvg_down',
@@ -59,7 +62,8 @@ def _feature_names(mode: str) -> list[str]:
         return [x for x in all_names if x in keep]
     keep = MOMENTUM_FEATURES | STRUCTURE_FEATURES | CONTEXT_FEATURES | {
         'oi_change', 'funding', 'book_imbalance', 'oi_available', 'funding_available',
-        'book_available', 'derivative_coverage',
+        'book_available', 'oi_weighted_funding', 'taker_imbalance',
+        'oi_weighted_funding_available', 'taker_available', 'derivative_coverage',
     }
     return [x for x in all_names if x in keep]
 

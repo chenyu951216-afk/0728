@@ -1,42 +1,47 @@
-# ETH 專屬 SMC / ICT 掃描器
+# ETH Adaptive AI 9.2
 
-只掃描 Gate `ETH_USDT` 現貨與 USDT 永續合約，產生繁體中文儀表板及 Discord 分級通知。程式不含下單、API 私鑰或提款功能。
+ETH 短線（非超短線）策略研究與訊號系統。系統會從 2020 年起做 point-in-time 歷史重播，在牛市、熊市、盤整、壓縮／擴張與反轉等不同 regime 中，分別演化 Signal 與 Entry/SL/TP；沒有通過未觸碰樣本驗證的結果不會進入正式訊號。
 
-## 功能
+## 9.2 學習流程
 
-- Gate 公開 REST 真實資料：4H / 1H / 15M / 5M 已收線、現貨量、永續量、資金費率、訂單簿
-- 確認 pivot、BOS、FVG、Fibonacci OTE、15M MSS、RVOL、訂單簿失衡
-- 柔性 100 分評分；預設 72 分，避免條件過嚴完全沒訊號
-- SQLite 訊號與通知去重；90 天快照保留
-- Discord Level 1–4 分級通知
-- `/api/backtest?days=30` 使用 Gate 真實歷史 K 線做無未來資料的快速驗證
-- 健康檢查 `/health`、JSON 狀態 `/api/status`、互動 API 文件 `/docs`
+1. 只用當下已收線的多交易所 K 線與當時已存在的衍生品資料建立特徵。
+2. 每個策略方向是「族群入口」，不是固定的 14 個模型：族群會演化 feature set、regime scope、recency、模型複雜度與正則化。
+3. mutation、選擇與 calibration 全部只在 development history 內完成，並使用 expanding walk-forward + purge。
+4. winner 固定後，才打開一次 sealed chronological holdout。失敗後不可拿同一段資料重調再測；至少新增 `SIGNAL_MIN_UNTOUCHED_HOLDOUT` 個成熟決策才可進下一代。
+5. 新挑戰者與舊 Champion 在同一段新 holdout 上比較；挑戰者沒有實質改善就保留舊 Champion。
+6. Signal Champion 只決定方向與市場適用範圍。Entry/SL/TP 由獨立的 DEV-only Execution Evolution 學習，最後仍需 untouched execution audit。
+
+## 止損／止盈
+
+- Entry、結構止損、ATR／近期 true-range 噪音下限、分批 RR、移動保護與持倉期限都納入 Execution Evolution。
+- 正式止損距離不得小於「學到的 ATR floor、近期市場噪音、最低百分比、交易成本倍數」四者最大值。預設 round-trip 成本最多只能占 1R 的 20%，因此像 ETH 1915 進場、1911 止損這種容易被正常波動與成本吃掉的方案不會直接產生。
+- 止損下限不是獲利保證；它只排除在成本與噪音尺度上先天不合理的風險計畫。
+
+## CoinGlass Standard
+
+程式會在有 `COINGLASS_API_KEY` 時使用 Standard 可取得的歷史資料：跨交易所 OI、清算量、orderbook、OI-weighted funding、aggregated taker buy/sell、global account long/short 與 top-trader position long/short。每個來源先做 retention/full-span capability audit；只涵蓋近期的來源仍可背景收集，但不會在歷史中途突然加入模型造成假 regime。
+
+CoinGlass liquidation heatmap 目前不是 Standard 權限。`COINGLASS_PLAN=STANDARD` 時程式明確不呼叫該端點；止損仍從歷史 MAE/MFE、清算、orderbook、taker 與 positioning 學習。若未來升級到 Professional/Enterprise，當前熱圖只能用於新單 live veto 和向前快照，不能回填過去或改寫已稽核的 SL。
 
 ## 本機啟動
 
-```bash
+```powershell
 python -m venv .venv
-# Windows: .venv\Scripts\activate
-# macOS/Linux: source .venv/bin/activate
+.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-copy .env.example .env
-python app.py
+Copy-Item .env.example .env
+python server_entry.py
 ```
 
-開啟 `http://localhost:8080`。程式只使用公開行情，不需要 Gate API Key。若要 Discord 通知，在部署環境加入 `DISCORD_WEBHOOK_URL`。
+預設服務位址為 `http://localhost:8080`。主要狀態端點：
 
-## GitHub → Zeabur
+- `/healthz`、`/readyz`：bootstrap 與 production readiness
+- `/api/v18/final-status`：最終認證、Champion 與 regime portfolio
+- `/api/v20/historical-evolution`：各 lineage 最近一次 holdout、genome 數與等待新資料狀態
+- `/api/v21/coinglass-standard`：Standard capability、資料範圍與可用性
 
-1. 把本資料夾全部推到 GitHub。
-2. Zeabur 建立 Project → Deploy New Service → GitHub，選擇此 repository。
-3. Zeabur 會自動讀取 `Dockerfile`。新增環境變數 `TZ=Asia/Taipei`、`SIGNAL_MIN_SCORE=72`，需要通知時再加 `DISCORD_WEBHOOK_URL`。
-4. 建立網域後開啟首頁。健康檢查路徑為 `/health`。
-5. 若希望重啟後保留 SQLite 歷史，掛載持久磁碟到 `/data`，並設 `DATABASE_PATH=/data/eth_scanner.db`。
+部署時請使用持久磁碟並將 `DATABASE_PATH` 指向該磁碟。不要提交 `.env`、API key、Discord token 或 SQLite 資料庫。
 
-`PORT` 由 Zeabur 自動注入，程式監聽 `0.0.0.0`。若正式環境需要多人存取，建議在 Zeabur 網域層加 Access Control。
+## 重要限制
 
-## 訊號原則
-
-正式訊號仍要求方向、OTE 與 15M 結構確認；FVG、量能、OI 代理與訂單簿採加權，不會因單一輔助資料短暫不足而整套停擺。`SIGNAL_MIN_SCORE` 建議 68–78；低於 65 容易產生雜訊。
-
-回測端點是核心趨勢回撤的快速 sanity check，並非完整逐筆成交模擬，也不構成績效承諾。本工具僅供量化研究與訊號提示，不構成投資建議。
+這是研究與訊號系統，不會保證「最強」或保證獲利。OOS、purge、一次性 holdout、cluster bootstrap、成本與 execution audit 能降低過擬合與不合理成交假設，但不能消除市場風險；上線前仍應 paper trade、限制單筆風險並監控 live drift。

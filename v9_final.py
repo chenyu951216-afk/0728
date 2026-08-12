@@ -331,6 +331,7 @@ def _policy_key(policy: dict[str, Any]) -> str:
     return json.dumps({
         'entry_atr': round(float(policy.get('entry_atr') or 0), 4),
         'stop_atr': round(float(policy.get('stop_atr') or 0), 2),
+        'noise_floor_mult': round(float(policy.get('noise_floor_mult') or 0), 2),
         'structure_mode': policy.get('structure_mode'),
         'target_rr': [round(float(x), 2) for x in policy.get('target_rr') or []],
         'allocations': list(policy.get('allocations') or []),
@@ -345,6 +346,7 @@ def _mutate_policy(parent: dict[str, Any], rng: random.Random, generation: int) 
     p = dict(parent)
     p['entry_atr'] = round(_clamp(float(p.get('entry_atr') or .05) * math.exp(rng.uniform(-.24, .24)), .015, .45), 4)
     p['stop_atr'] = round(_clamp(float(p.get('stop_atr') or 1.2) + rng.uniform(-.28, .28), .60, 3.20), 2)
+    p['noise_floor_mult'] = round(_clamp(float(p.get('noise_floor_mult') or 1.0) + rng.uniform(-.16, .16), .60, 1.80), 2)
     rr = [float(x) for x in p.get('target_rr') or (0.8, 1.4, 2.1, 3.2)]
     rr = [round(_clamp(x + rng.uniform(-.22, .22), .45, 5.50), 2) for x in rr]
     rr[1] = round(max(rr[1], rr[0] + .25), 2); rr[2] = round(max(rr[2], rr[1] + .30), 2); rr[3] = round(max(rr[3], rr[2] + .40), 2)

@@ -99,6 +99,7 @@ def _walkforward_ranges(n: int) -> list[tuple[int, int]]:
 def _policy_signature(policy: dict[str, Any]) -> str:
     return json.dumps({
         'entry_atr': policy.get('entry_atr'), 'stop_atr': policy.get('stop_atr'),
+        'noise_floor_mult': policy.get('noise_floor_mult'),
         'structure_mode': policy.get('structure_mode'), 'target_rr': policy.get('target_rr'),
         'allocations': policy.get('allocations'), 'lock_after_tp2_r': policy.get('lock_after_tp2_r'),
         'lock_after_tp3_r': policy.get('lock_after_tp3_r'), 'expire_bars': policy.get('expire_bars'),
