@@ -18,7 +18,6 @@ logging.basicConfig(level=os.getenv('LOG_LEVEL', 'INFO'), format='%(asctime)s %(
 
 
 def _resolve_port() -> int:
-    """Use the single Git-service port exposed by Dockerfile/Zeabur."""
     raw = os.getenv('PORT', '8080')
     try:
         value = int(str(raw).strip())
@@ -38,8 +37,34 @@ STARTUP_ERROR_TYPE: str | None = None
 STARTUP_ERROR_TEXT: str | None = None
 
 
+def _prepare_91_generation(production: Any) -> None:
+    """One-time migration: make old 9.0 certification due under the new 9.1 learner.
+
+    Historical/raw/derived samples are preserved. Only the previous certification
+    timestamp is invalidated once so the new sealed-holdout evolution actually runs
+    immediately after upgrade instead of inheriting a recent 0/14 result.
+    """
+    try:
+        core = production.core
+        version = str(production.signal_evolution.VERSION)
+        marker_key = 'v20_historical_evolution_migration'
+        if core.get_state(marker_key, '') == version:
+            return
+        state = core.get_state('v18_final_system_state', None)
+        state = dict(state) if isinstance(state, dict) else {}
+        state['last_cert_completed_at'] = 0
+        state['status'] = 'READY_FOR_SIGNAL_CERTIFICATION'
+        state['reason'] = '9.1 multi-generation Signal evolution requires one fresh certification pass on preserved CLEAN historical samples'
+        core.set_state('v18_final_system_state', state)
+        core.set_state(marker_key, version)
+        LOG.info('9.1 evolution migration armed: preserved all historical data; invalidated certification timestamp only')
+    except Exception:
+        LOG.exception('9.1 evolution migration preparation failed; production remains fail-closed')
+
+
 def _import_production_blocking() -> tuple[Any, Any]:
     production = importlib.import_module('server_v19')
+    _prepare_91_generation(production)
     return production, production.app
 
 
@@ -84,17 +109,14 @@ async def _bootstrap_lifespan(_: FastAPI):
             LOG.exception('production lifespan shutdown failed')
 
 
-bootstrap = FastAPI(title='ETH Adaptive AI bootstrap', version='9.0.4-bootstrap', lifespan=_bootstrap_lifespan)
+bootstrap = FastAPI(title='ETH Adaptive AI bootstrap', version='9.1.0-bootstrap', lifespan=_bootstrap_lifespan)
 
 
 @bootstrap.get('/healthz')
 def healthz() -> JSONResponse:
     return JSONResponse(status_code=200, content={
-        'ok': True,
-        'alive': True,
-        'startup_status': STARTUP_STATUS,
-        'startup_error_type': STARTUP_ERROR_TYPE,
-        'port': PORT,
+        'ok': True, 'alive': True, 'startup_status': STARTUP_STATUS,
+        'startup_error_type': STARTUP_ERROR_TYPE, 'port': PORT,
     })
 
 
@@ -102,29 +124,23 @@ def healthz() -> JSONResponse:
 def readyz() -> JSONResponse:
     ready = PRODUCTION_APP is not None
     return JSONResponse(status_code=200 if ready else 503, content={
-        'ok': ready,
-        'ready': ready,
-        'startup_status': STARTUP_STATUS,
-        'startup_error_type': STARTUP_ERROR_TYPE,
-        'port': PORT,
+        'ok': ready, 'ready': ready, 'startup_status': STARTUP_STATUS,
+        'startup_error_type': STARTUP_ERROR_TYPE, 'port': PORT,
     })
 
 
 @bootstrap.get('/', response_class=HTMLResponse)
 def bootstrap_dashboard() -> str:
     err = STARTUP_ERROR_TEXT or '—'
-    return f'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ETH Adaptive AI</title><style>body{{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#071426;color:#e8f0ff;margin:0;padding:28px}}.card{{max-width:760px;margin:40px auto;padding:24px;border:1px solid #29466d;border-radius:20px;background:#0b1b31}}h1{{margin-top:0}}.warn{{color:#ffd36e}}.bad{{color:#ff7187}}code{{word-break:break-word}}</style></head><body><div class="card"><h1>ETH Adaptive AI 9.0.4</h1><h2 class="{'bad' if STARTUP_ERROR_TYPE else 'warn'}">Bootstrap HTTP ONLINE · {STARTUP_STATUS}</h2><p>Listening: <code>0.0.0.0:{PORT}</code></p><p>正式 Runtime 完成前，新訊號與交易維持 fail-closed。</p><p>錯誤：<code>{err}</code></p></div></body></html>'''
+    return f'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ETH Adaptive AI</title><style>body{{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#071426;color:#e8f0ff;margin:0;padding:28px}}.card{{max-width:760px;margin:40px auto;padding:24px;border:1px solid #29466d;border-radius:20px;background:#0b1b31}}h1{{margin-top:0}}.warn{{color:#ffd36e}}.bad{{color:#ff7187}}code{{word-break:break-word}}</style></head><body><div class="card"><h1>ETH Adaptive AI 9.1.0</h1><h2 class="{'bad' if STARTUP_ERROR_TYPE else 'warn'}">Bootstrap HTTP ONLINE · {STARTUP_STATUS}</h2><p>Listening: <code>0.0.0.0:{PORT}</code></p><p>正式 Runtime 完成前，新訊號與交易維持 fail-closed。</p><p>錯誤：<code>{err}</code></p></div></body></html>'''
 
 
 @bootstrap.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'])
 async def bootstrap_fallback(path: str, request: Request) -> JSONResponse:
     _ = path, request
     return JSONResponse(status_code=503, content={
-        'ok': False,
-        'mode': 'FAIL_CLOSED_BOOTSTRAP',
-        'startup_status': STARTUP_STATUS,
-        'startup_error_type': STARTUP_ERROR_TYPE,
-        'port': PORT,
+        'ok': False, 'mode': 'FAIL_CLOSED_BOOTSTRAP', 'startup_status': STARTUP_STATUS,
+        'startup_error_type': STARTUP_ERROR_TYPE, 'port': PORT,
     })
 
 
