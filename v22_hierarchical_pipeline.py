@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import time
 from typing import Any
 
@@ -9,20 +12,42 @@ import v15_data_resilience as resilience
 import v16_runtime_integrity as runtime_integrity
 import v20_historical_signal_evolution as evolution
 
-VERSION = '10.0.0-20260812'
-FEATURE_SCHEMA = 8
+VERSION = '10.1.0-20260813'
+FEATURE_SCHEMA = 9
 STATE_KEY = 'hierarchical_learning_schema'
 EXPECTED_LINEAGES = len(v5_runtime.STRATEGIES) * len(v5_runtime.DIRECTIONS)
+COLLECTION_CUTOFF_KEY = 'causal_price_collection_cutoff_ts'
+COLLECTION_CONTRACT_KEY = 'causal_price_collection_contract_v1'
+PRICE_MIN_COVERAGE_PCT = max(99.0, min(100.0, float(os.getenv('CAUSAL_PRICE_MIN_COVERAGE_PCT', '100.0'))))
+PRICE_MAX_MISSING_BARS = max(0, min(500, int(os.getenv('CAUSAL_PRICE_MAX_MISSING_BARS', '0'))))
+PRICE_START_TOLERANCE_BARS = max(0, min(12, int(os.getenv('CAUSAL_PRICE_START_TOLERANCE_BARS', '2'))))
+PRICE_TAIL_TOLERANCE_BARS = max(1, min(48, int(os.getenv('CAUSAL_PRICE_TAIL_TOLERANCE_BARS', '3'))))
+
+PRICE_GROUPS = (
+    ('MACRO_CONTEXT', (('ETH', '1d'), ('ETH', '4h'))),
+    ('MARKET_STRUCTURE', (('ETH', '1h'), ('ETH', '30m'), ('BTC', '1h'))),
+    ('SHORT_HORIZON_EXECUTION', (('ETH', '15m'), ('ETH', '5m'))),
+)
 
 
 def _pct(value: float) -> float:
     return round(max(0.0, min(100.0, float(value))), 2)
 
 
+def _collection_cutoff(core: Any) -> int:
+    cutoff = int(core.get_state(COLLECTION_CUTOFF_KEY, 0) or 0)
+    if cutoff <= int(core.START_TS):
+        cutoff = int(time.time())
+        core.set_state(COLLECTION_CUTOFF_KEY, cutoff)
+    return cutoff
+
+
 def _series_progress(core: Any, asset: str, tf: str) -> dict[str, Any]:
     sec = int(core.TIMEFRAME_SECONDS[tf])
     start = int(core.START_TS)
-    target_end = (int(time.time()) // sec) * sec - sec
+    # Freeze the initial collection horizon. Otherwise "collect everything first"
+    # can never finish because the live edge moves forward on every status refresh.
+    target_end = (_collection_cutoff(core) // sec) * sec - sec
     expected = max(1, (target_end - start) // sec + 1)
     placeholders = ','.join('?' for _ in resilience.PRICE_PRIORITY)
     con = core.db()
@@ -39,34 +64,213 @@ def _series_progress(core: Any, asset: str, tf: str) -> dict[str, Any]:
     earliest = int(row[1]) if row and row[1] is not None else None
     latest = int(row[2]) if row and row[2] is not None else None
     if not unique or earliest is None or latest is None:
-        return {'asset': asset, 'timeframe': tf, 'percent': 0.0, 'bars': 0, 'expected_bars': expected, 'from': None, 'to': None, 'gaps_estimate': expected}
-    span_expected = max(1, (latest - earliest) // sec + 1)
-    density = unique / span_expected
-    historical_span = max(0.0, (latest - start + sec) / max(target_end - start + sec, sec))
-    percent = _pct(min(historical_span, unique / expected) * min(1.0, density) * 100.0)
+        return {
+            'asset': asset, 'timeframe': tf, 'percent': 0.0, 'bars': 0,
+            'expected_bars': expected, 'from': None, 'to': None,
+            'target_from': start, 'target_to': target_end, 'gaps_estimate': expected,
+            'start_ready': False, 'tail_ready': False, 'coverage_ready': False,
+            'history_ready': False, 'required_coverage_pct': PRICE_MIN_COVERAGE_PCT,
+            'maximum_missing_bars_before_replay': PRICE_MAX_MISSING_BARS,
+        }
+    raw_percent = unique / expected * 100.0
+    percent = _pct(raw_percent)
+    missing_bars = max(0, expected - unique)
+    start_ready = earliest <= start + PRICE_START_TOLERANCE_BARS * sec
+    tail_ready = latest >= target_end - PRICE_TAIL_TOLERANCE_BARS * sec
+    coverage_ready = raw_percent >= PRICE_MIN_COVERAGE_PCT and missing_bars <= PRICE_MAX_MISSING_BARS
+    history_ready = bool(start_ready and tail_ready and coverage_ready)
     return {
         'asset': asset, 'timeframe': tf, 'percent': percent, 'bars': unique,
         'expected_bars': expected, 'from': earliest, 'to': latest,
-        'gaps_estimate': max(0, span_expected - unique), 'density': round(density, 6),
+        'target_from': start, 'target_to': target_end,
+        'gaps_estimate': missing_bars,
+        'density': round(unique / expected, 6),
+        'start_ready': start_ready, 'tail_ready': tail_ready,
+        'coverage_ready': coverage_ready, 'history_ready': history_ready,
+        'required_coverage_pct': PRICE_MIN_COVERAGE_PCT,
+        'maximum_missing_bars_before_replay': PRICE_MAX_MISSING_BARS,
     }
 
 
 def price_foundation(core: Any) -> dict[str, Any]:
-    groups = (
-        ('MACRO_CONTEXT', (('ETH', '1d'), ('ETH', '4h'))),
-        ('MARKET_STRUCTURE', (('ETH', '1h'), ('ETH', '30m'), ('BTC', '1h'))),
-        ('SHORT_HORIZON_EXECUTION', (('ETH', '15m'), ('ETH', '5m'))),
-    )
     out: dict[str, Any] = {}
-    for name, specs in groups:
+    for name, specs in PRICE_GROUPS:
         series = [_series_progress(core, asset, tf) for asset, tf in specs]
         percent = min((float(item['percent']) for item in series), default=0.0)
+        ready = bool(series and all(bool(item.get('history_ready')) for item in series))
         out[name] = {
-            'status': 'COMPLETE' if percent >= 99.5 else 'RUNNING' if percent > 0 else 'WAITING',
+            'status': 'COMPLETE' if ready else 'COLLECTING' if percent > 0 else 'WAITING',
             'percent': _pct(percent), 'series': series,
-            'rule': 'closed exchange candles only; canonical priority is fixed per timestamp; no interpolation',
+            'history_ready': ready,
+            'rule': 'collect the frozen full-history horizon first; closed exchange candles only; fixed canonical priority; no interpolation',
         }
     return out
+
+
+def price_collection_gate(core: Any) -> dict[str, Any]:
+    foundation = price_foundation(core)
+    series = [item for group in foundation.values() for item in group['series']]
+    ready = bool(series and all(bool(item.get('history_ready')) for item in series))
+    starts = {f"{item['asset']}:{item['timeframe']}": item.get('from') for item in series}
+    payload = {
+        'schema': FEATURE_SCHEMA,
+        'cutoff_ts': _collection_cutoff(core),
+        'required_coverage_pct': PRICE_MIN_COVERAGE_PCT,
+        'maximum_missing_bars_before_replay': PRICE_MAX_MISSING_BARS,
+        'starts': starts,
+        'targets': {f"{item['asset']}:{item['timeframe']}": item.get('target_to') for item in series},
+    }
+    fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()[:24]
+    blockers = [
+        {
+            'asset': item['asset'], 'timeframe': item['timeframe'],
+            'percent': item['percent'], 'from': item.get('from'), 'to': item.get('to'),
+            'target_from': item.get('target_from'), 'target_to': item.get('target_to'),
+            'gaps_estimate': item.get('gaps_estimate'),
+        }
+        for item in series if not item.get('history_ready')
+    ]
+    status = {
+        'ready': ready,
+        'status': 'READY_FOR_CAUSAL_REPLAY' if ready else 'COLLECTING_FULL_HISTORY_BEFORE_REPLAY',
+        'percent': min((float(item['percent']) for item in series), default=0.0),
+        'cutoff_ts': _collection_cutoff(core), 'contract_fingerprint': fingerprint,
+        'starts': starts, 'blockers': blockers, 'foundation': foundation,
+        'future_data_available_to_decision': False,
+        'future_5m_after_decision_is_label_only': True,
+        'contract': payload,
+    }
+    core.state['causal_price_collection_gate'] = status
+    return status
+
+
+def _first_collection_gap(core: Any) -> dict[str, Any] | None:
+    placeholders = ','.join('?' for _ in resilience.PRICE_PRIORITY)
+    for _group, specs in PRICE_GROUPS:
+        for asset, tf in specs:
+            sec = int(core.TIMEFRAME_SECONDS[tf])
+            start = int(core.START_TS)
+            target_end = (_collection_cutoff(core) // sec) * sec - sec
+            con = core.db()
+            try:
+                first_last = con.execute(
+                    f'''SELECT MIN(ts),MAX(ts) FROM market_bars
+                        WHERE asset=? AND tf=? AND ts BETWEEN ? AND ?
+                          AND source IN ({placeholders})''',
+                    (asset, tf, start, target_end, *resilience.PRICE_PRIORITY),
+                ).fetchone()
+                earliest = int(first_last[0]) if first_last and first_last[0] is not None else None
+                latest = int(first_last[1]) if first_last and first_last[1] is not None else None
+                if earliest is None or earliest > start:
+                    missing = start
+                else:
+                    row = con.execute(
+                        f'''WITH unique_ts AS (
+                                SELECT DISTINCT ts FROM market_bars
+                                WHERE asset=? AND tf=? AND ts BETWEEN ? AND ?
+                                  AND source IN ({placeholders})
+                            ), ordered AS (
+                                SELECT ts,LAG(ts) OVER (ORDER BY ts) AS previous_ts FROM unique_ts
+                            )
+                            SELECT previous_ts+? FROM ordered
+                            WHERE previous_ts IS NOT NULL AND ts-previous_ts>?
+                            ORDER BY ts LIMIT 1''',
+                        (asset, tf, start, target_end, *resilience.PRICE_PRIORITY, sec, sec),
+                    ).fetchone()
+                    missing = int(row[0]) if row and row[0] is not None else (latest + sec if latest is not None and latest < target_end else None)
+            finally:
+                con.close()
+            if missing is not None and missing <= target_end:
+                return {
+                    'asset': asset, 'timeframe': tf, 'missing_ts': int(missing),
+                    'target_from': start, 'target_to': target_end,
+                }
+    return None
+
+
+async def _repair_collection_gap(core: Any, target: dict[str, Any]) -> dict[str, Any]:
+    asset = str(target['asset'])
+    tf = str(target['timeframe'])
+    missing = int(target['missing_ts'])
+    sec = int(core.TIMEFRAME_SECONDS[tf])
+    end_ts = min(int(target['target_to']), missing + 999 * sec)
+    errors: list[str] = []
+    attempts: list[dict[str, Any]] = []
+    for source in core.hub.history_source_order(tf, end_ts):
+        try:
+            rows = await core.hub.fetch_history(source, asset, tf, end_ts=end_ts, limit=1000)
+            payload = [row.dict() for row in rows if int(core.START_TS) <= int(row.ts) <= int(target['target_to'])]
+            added = int(core.insert_bars(source, asset, tf, payload) or 0) if payload else 0
+            exact = any(int(row.ts) == missing for row in rows)
+            attempts.append({'source': source, 'rows': len(rows), 'added': added, 'exact_missing_bar': exact})
+            if exact:
+                result = {
+                    'status': 'REPAIRED_PAGE', 'asset': asset, 'timeframe': tf,
+                    'missing_ts': missing, 'source': source, 'added': added,
+                    'attempts': attempts, 'no_interpolation': True,
+                }
+                core.state['causal_price_collection_repair'] = result
+                return result
+        except Exception as exc:
+            errors.append(f'{source}: {exc}')
+            attempts.append({'source': source, 'error': str(exc)[-500:]})
+    result = {
+        'status': 'STILL_MISSING', 'asset': asset, 'timeframe': tf,
+        'missing_ts': missing, 'attempts': attempts, 'errors': errors[-8:],
+        'no_interpolation': True,
+    }
+    core.state['causal_price_collection_repair'] = result
+    return result
+
+
+def _activate_collection_contract(core: Any, gate: dict[str, Any]) -> None:
+    candidate = dict(gate.get('contract') or {})
+    previous = core.get_state(COLLECTION_CONTRACT_KEY, {})
+    previous = dict(previous) if isinstance(previous, dict) else {}
+    previous_starts = dict(previous.get('starts') or {})
+    candidate_starts = dict(candidate.get('starts') or {})
+    if previous_starts and previous_starts != candidate_starts:
+        # Raw history was extended behind an already-advanced cursor. Derived rows
+        # are disposable; replay them from the beginning so newly discovered older
+        # decisions can never be silently omitted.
+        cursor_integrity._reset_derived_replay(
+            core,
+            '10.1 raw full-history start changed behind replay cursor; rebuild every causal decision from the frozen horizon',
+        )
+    candidate.update({
+        'activated_at': int(previous.get('activated_at') or time.time()),
+        'contract_fingerprint': gate.get('contract_fingerprint'),
+        'raw_history_can_expand_behind_cursor_without_reset': False,
+    })
+    core.set_state(COLLECTION_CONTRACT_KEY, candidate)
+
+
+def _install_full_history_replay_gate(core: Any) -> None:
+    original_generate = v5_runtime.generate_learning_samples_v5
+
+    def causal_generate(c: Any, batch: int = 500) -> int:
+        gate = price_collection_gate(c)
+        if not gate.get('ready'):
+            learning = c.state.setdefault('learning', {})
+            learning['phase'] = 'COLLECTING_FULL_HISTORY_BEFORE_REPLAY'
+            learning['replay_price_blocker'] = {
+                'blocked': True,
+                'state': 'WAITING_FOR_FULL_HISTORY',
+                'reason': 'strict point-in-time replay cannot start until every required price timeframe meets the frozen full-history coverage contract',
+                'collection_percent': gate.get('percent'),
+                'blockers': gate.get('blockers'),
+            }
+            learning['causal_price_collection_gate'] = gate
+            return 0
+        _activate_collection_contract(c, gate)
+        learning = c.state.setdefault('learning', {})
+        if str(learning.get('phase') or '').startswith('COLLECTING_FULL_HISTORY'):
+            learning['phase'] = 'STRICT_REPLAY_ADVANCING'
+        learning['causal_price_collection_gate'] = gate
+        return int(original_generate(c, batch) or 0)
+
+    v5_runtime.generate_learning_samples_v5 = causal_generate
+    core.generate_learning_samples = lambda batch=500: causal_generate(core, batch)
 
 
 def _stage(name: str, percent: float, status: str, evidence: dict[str, Any], blocker: str | None = None) -> dict[str, Any]:
@@ -75,6 +279,7 @@ def _stage(name: str, percent: float, status: str, evidence: dict[str, Any], blo
 
 def pipeline_status(core: Any) -> dict[str, Any]:
     price = price_foundation(core)
+    collection = price_collection_gate(core)
     learning = core.state.get('learning') if isinstance(core.state.get('learning'), dict) else {}
     source = learning.get('data_resilience') if isinstance(learning.get('data_resilience'), dict) else {}
     replay = runtime_integrity.replay_progress(core)
@@ -110,7 +315,15 @@ def pipeline_status(core: Any) -> dict[str, Any]:
             'enrichment_sources': list(source.get('model_enrichment_sources') or []),
             'missing_groups_are_generation_wide_masks': True,
         }, None if derivative_ready else 'waiting for provider capability audit; range-limited data will be masked, never backfilled with present values'),
-        _stage('5. POINT_IN_TIME_EVENT_REPLAY', replay_pct, 'COMPLETE' if replay.get('complete') else 'RUNNING', replay, None if replay.get('complete') else str((learning.get('replay_price_blocker') or {}).get('reason') or 'advancing only through matured 8h labels')),
+        _stage(
+            '5. POINT_IN_TIME_EVENT_REPLAY', replay_pct,
+            'COMPLETE' if replay.get('complete') else 'WAITING' if str(replay.get('status') or '').startswith('WAITING') else 'RUNNING',
+            replay,
+            None if replay.get('complete') else str(
+                replay.get('reason') or (learning.get('replay_price_blocker') or {}).get('reason') or
+                'advancing only through matured 8h labels'
+            ),
+        ),
         _stage('6. HIERARCHICAL_DEV_EVOLUTION', evo_pct, 'COMPLETE' if terminal_count >= EXPECTED_LINEAGES else 'WAITING' if not replay.get('complete') else 'RUNNING', {
             'search_order': ['MACRO_REGIME', 'MARKET_STRUCTURE', 'SHORT_HORIZON_SIGNAL'],
             'terminal_lineages': terminal_count, 'expected_lineages': EXPECTED_LINEAGES,
@@ -147,10 +360,14 @@ def pipeline_status(core: Any) -> dict[str, Any]:
             'provider_retention_is_capability': True,
             'synthetic_gap_fill': False,
         },
+        'price_collection_gate': collection,
         'no_lookahead_contract': {
+            'raw_history_may_be_precollected_but_is_not_visible_to_historical_decisions': True,
             'features_use_closed_bars_only': True,
             'higher_timeframe_close_required': True,
             'future_5m_path_is_label_only': True,
+            'future_path_revealed_only_after_entry_stop_target_plan_is_frozen': True,
+            'future_path_is_processed_in_timestamp_order': True,
             'execution_simulation_is_sequential_after_decision': True,
             'purged_walk_forward_development_only': True,
             'sealed_holdout_opened_once_after_candidate_freeze': True,
@@ -166,18 +383,18 @@ def _ensure_feature_schema(core: Any) -> None:
     current = int(core.get_state(STATE_KEY, 0) or 0)
     if current >= FEATURE_SCHEMA:
         return
-    con = core.db()
-    try:
-        tables = {str(row[0]) for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-        sample_count = int(con.execute('SELECT COUNT(*) FROM learning_samples').fetchone()[0] or 0) if 'learning_samples' in tables else 0
-        champion_count = int(con.execute("SELECT COUNT(*) FROM model_registry WHERE status='CHAMPION'").fetchone()[0] or 0) if 'model_registry' in tables else 0
-    finally:
-        con.close()
-    if sample_count or champion_count:
-        cursor_integrity._reset_derived_replay(core, '10.0 hierarchical feature schema: rebuild labels from closed macro -> structure -> short-horizon context')
+    # Always rewind the derived cursor on this one-time schema migration. A stale
+    # cursor with zero surviving samples is just as unsafe as an obviously partial
+    # sample table. Raw price/derivative caches and the dataset identity are kept.
+    cursor_integrity._reset_derived_replay(
+        core,
+        '10.1 causal full-history schema: collect the frozen raw horizon before rebuilding every point-in-time decision',
+    )
+    core.set_state(COLLECTION_CUTOFF_KEY, int(time.time()))
+    core.set_state(COLLECTION_CONTRACT_KEY, {})
     state = core.get_state('v18_final_system_state', {})
     state = dict(state) if isinstance(state, dict) else {}
-    state.update({'last_cert_completed_at': 0, 'status': 'WAITING_FOR_REPLAY', 'reason': '10.0 hierarchical point-in-time replay must complete before new certification'})
+    state.update({'last_cert_completed_at': 0, 'status': 'WAITING_FOR_FULL_HISTORY', 'reason': '10.1 must collect the frozen multi-timeframe price horizon before causal replay and certification'})
     core.set_state('v18_final_system_state', state)
     core.set_state(STATE_KEY, FEATURE_SCHEMA)
 
@@ -185,10 +402,14 @@ def _ensure_feature_schema(core: Any) -> None:
 def install(core: Any) -> None:
     _ensure_feature_schema(core)
     core.BACKFILL_PLAN = [('ETH', '1d'), ('ETH', '4h'), ('BTC', '1h'), ('ETH', '1h'), ('ETH', '30m'), ('ETH', '15m'), ('ETH', '5m')]
+    core.price_collection_gate = lambda: price_collection_gate(core)
+    _install_full_history_replay_gate(core)
     def hierarchical_bootstrap_progress(_con: Any = None) -> dict[str, Any]:
         foundation = price_foundation(core)
         return {
-            'overall': round(sum(group['percent'] for group in foundation.values()) / 3.0, 2),
+            # A prerequisite pipeline is only as complete as its least-covered
+            # required group. Averaging 100%, 100%, 0.1% into 66.7% was misleading.
+            'overall': round(min((group['percent'] for group in foundation.values()), default=0.0), 2),
             'hierarchical': foundation,
         }
 
@@ -197,16 +418,23 @@ def install(core: Any) -> None:
 
     async def hierarchical_learning_tick() -> None:
         await original_learning()
+        gate = price_collection_gate(core)
+        if not gate.get('ready'):
+            target = _first_collection_gap(core)
+            if target:
+                await _repair_collection_gap(core, target)
         pipeline_status(core)
 
     core.learning_tick = hierarchical_learning_tick
     core.state['runtime_version'] = VERSION
-    core.app.version = '10.0.0'
+    core.app.version = '10.1.0'
     core.state.setdefault('strict_replay', {})['hierarchical_pipeline'] = {
         'runtime': VERSION, 'feature_schema': FEATURE_SCHEMA,
         'learning_order': ['1D/4H macro', '1H/30M structure', '15M/5M short-horizon', 'sealed OOS', 'Entry/SL/TP untouched audit'],
         'future_price_features': False, 'same_holdout_reuse': False,
         'live_single_trade_retraining': False,
+        'full_history_collection_precedes_initial_replay': True,
+        'replay_progress_is_decision_count_not_wall_clock_distance': True,
     }
     pipeline_status(core)
 

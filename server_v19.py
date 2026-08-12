@@ -30,10 +30,10 @@ install_signal_evolution(core)
 install_coinglass_standard(core)
 install_hierarchical_pipeline(core)
 
-RUNTIME_VERSION = '10.0.0-20260812'
+RUNTIME_VERSION = '10.1.0-20260813'
 core.state['runtime_version'] = RUNTIME_VERSION
 core.state.setdefault('strict_replay', {})['runtime'] = RUNTIME_VERSION
-core.app.version = '10.0.0'
+core.app.version = '10.1.0'
 
 app = core.app
 PORT = core.PORT
@@ -146,7 +146,7 @@ def _preflight_worker() -> None:
             'completed_at': int(time.time()), 'result': result,
         }
         _PREFLIGHT_READY.set()
-        LOG.info('10.0.0 startup provenance preflight complete: %s', result.get('status'))
+        LOG.info('10.1.0 startup provenance preflight complete: %s', result.get('status'))
     except Exception as exc:
         _PREFLIGHT_FAILED.set()
         core.state['startup_preflight'] = {
@@ -154,7 +154,7 @@ def _preflight_worker() -> None:
             'failed_at': int(time.time()), 'error': f'{type(exc).__name__}: {exc}',
             'reason': 'web remains online; certification and new orders remain fail-closed until this is repaired',
         }
-        LOG.exception('10.0.0 startup provenance preflight failed')
+        LOG.exception('10.1.0 startup provenance preflight failed')
 
 
 threading.Thread(target=_preflight_worker, name='source-provenance-preflight', daemon=True).start()
@@ -165,8 +165,8 @@ app.router.routes = [route for route in app.router.routes if getattr(route, 'pat
 @app.get('/', response_class=HTMLResponse)
 def dashboard() -> str:
     html = base.dashboard()
-    html = html.replace('ETH Adaptive AI 8.4.1 Certification Orchestrator', 'ETH Adaptive AI 10.0 Hierarchical Learning')
-    html = html.replace('ETH Adaptive AI 8.4', 'ETH Adaptive AI 10.0')
+    html = html.replace('ETH Adaptive AI 8.4.1 Certification Orchestrator', 'ETH Adaptive AI 10.1 Causal Full-History Learning')
+    html = html.replace('ETH Adaptive AI 8.4', 'ETH Adaptive AI 10.1')
     startup_card = '''
 <section class="card"><h2>🧭 Hierarchical Point-in-Time Learning / Final Authority</h2>
 <div id="startup19" class="notice">讀取八階段學習狀態…</div>

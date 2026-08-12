@@ -1,14 +1,14 @@
-# ETH Adaptive AI 10.0
+# ETH Adaptive AI 10.1
 
 ETH 短線（非超短線）策略研究與訊號系統。系統會從 2020 年起做 point-in-time 歷史重播，在牛市、熊市、盤整、壓縮／擴張與反轉等不同 regime 中，分別演化 Signal 與 Entry/SL/TP；沒有通過未觸碰樣本驗證的結果不會進入正式訊號。
 
-## 10.0 分層 Point-in-Time 學習流程
+## 10.1 分層 Point-in-Time 學習流程
 
-10.0 將學習拆成一條不可跳階的因果流程：先完成 ETH 1D/4H 宏觀趨勢，再學習 1H/30M 市場結構，最後才開放 15M/5M 短線入場。候選策略在 development history 內依 `MACRO_REGIME -> MARKET_STRUCTURE -> SHORT_HORIZON_SIGNAL` 順序演化，每個 lineage 的 sealed OOS 僅能開封一次。
+10.1 先凍結初始資料截止點並收齊 1D/4H/1H/30M/15M/5M 原始歷史，才從第一個合法歷史決策開始因果回放。每個決策只能看當時已收盤、已發布的資料；下單計畫凍結後，才把未來 5M 逐根快轉作為成交與損益標籤。候選策略在 development history 內依 `MACRO_REGIME -> MARKET_STRUCTURE -> SHORT_HORIZON_SIGNAL` 順序演化，每個 lineage 的 sealed OOS 僅能開封一次。
 
 價格來源會依預先固定的 Gate、Bybit、Binance、OKX、Bitget 優先序進行能力檢查與逐時點復原。來源不支援某段歷史時會切換下一來源，不會重複請求必然失敗的 API，也不會插值或拿現在的資料回填過去。
 
-部署 10.0 不需要新的必填環境變數；現有 `COINGLASS_API_KEY` 與 `COINGLASS_PLAN=STANDARD` 可直接沿用。舊版派生樣本與 Champion 會在一次性特徵 schema 遷移後重建，原始市場與衍生品資料不會刪除。
+部署 10.1 不需要新的必填環境變數；現有 `COINGLASS_API_KEY` 與 `COINGLASS_PLAN=STANDARD` 可直接沿用。新增的 `CAUSAL_PRICE_*`、`SIGNAL_MIN_OOS_*` 與 `EXECUTION_MIN_AUDIT_*` 均有安全預設值。舊版派生樣本與 Champion 會在一次性特徵 schema 遷移後重建，原始市場與衍生品資料不會刪除。
 
 1. 只用當下已收線的多交易所 K 線與當時已存在的衍生品資料建立特徵。
 2. 每個策略方向是「族群入口」，不是固定的 14 個模型：族群會演化 feature set、regime scope、recency、模型複雜度與正則化。
