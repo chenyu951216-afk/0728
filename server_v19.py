@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import threading
 import time
 
@@ -153,7 +154,15 @@ def _preflight_worker() -> None:
         LOG.exception('%s startup provenance preflight failed', RUNTIME_VERSION)
 
 
-threading.Thread(target=_preflight_worker, name='source-provenance-preflight', daemon=True).start()
+_BOOTSTRAP_ROLE = str(os.getenv('ETH_RUNTIME_BOOTSTRAP_ROLE', 'LEADER')).upper()
+if _BOOTSTRAP_ROLE.startswith('FOLLOWER'):
+    core.state['startup_preflight'] = {
+        'status': 'FOLLOWER_READ_ONLY', 'ready': False,
+        'reason': 'another replica owns the bootstrap lock; duplicate import-time provenance preflight suppressed',
+        'bootstrap_role': _BOOTSTRAP_ROLE,
+    }
+else:
+    threading.Thread(target=_preflight_worker, name='source-provenance-preflight', daemon=True).start()
 
 app.router.routes = [route for route in app.router.routes if getattr(route, 'path', None) != '/']
 
