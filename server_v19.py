@@ -39,17 +39,13 @@ runtime_identity.stamp(core)
 app = core.app
 PORT = core.PORT
 
-# A failed generation must not be re-run hourly on byte-identical evidence. Repeatedly
-# peeking at the same OOS until something passes is itself meta-overfitting. A new
-# generation becomes due only after enough newly matured labels arrive, unless explicitly forced.
+
 def _evolution_certification_due(core_obj, snap: dict, force: bool) -> bool:
     if force:
         return True
     state = final_system._final_state(core_obj)
     now = int(time.time())
     total = int(snap.get('learning_samples') or 0)
-    max_ts = int(snap.get('sample_max_ts') or 0)
-    last_total = int(state.get('last_cert_sample_total') or 0)
     last_max = int(state.get('last_cert_sample_max_ts') or 0)
     last_at = int(state.get('last_cert_completed_at') or 0)
     if last_at <= 0 and total > 0:
@@ -69,19 +65,15 @@ def _evolution_certification_due(core_obj, snap: dict, force: bool) -> bool:
         'ready': new_decisions >= signal_evolution.MIN_UNTOUCHED_HOLDOUT,
         'checked_at': now,
     }
-    if new_decisions >= signal_evolution.MIN_UNTOUCHED_HOLDOUT:
-        return True
-    return False
+    return new_decisions >= signal_evolution.MIN_UNTOUCHED_HOLDOUT
+
 
 final_system._certification_due = _evolution_certification_due
-# 10.2 fixed-horizon contract: historical replay targets the immutable deployment
-# cutoff, certification begins only after that replay is complete, and candles that
-# arrive during learning are intentionally skipped before current-live handoff.
 fixed_horizon_runtime.install(core, runtime_integrity, final_system, signal_evolution)
 
-# Deduplicate Discord certification summaries by semantic result rather than timestamp.
-# A new generation/result still notifies; an unchanged waiting/result summary does not repeat hourly.
 _original_send_pending_notice = final_system._send_pending_notice
+
+
 async def _dedup_send_pending_notice(core_obj):
     notice = core_obj.state.get('v18_pending_notice')
     if not isinstance(notice, dict):
@@ -99,11 +91,11 @@ async def _dedup_send_pending_notice(core_obj):
     if sent >= int(notice.get('at') or 0):
         core_obj.set_state('v20_last_cert_notice_fingerprint', fp)
 
+
 final_system._send_pending_notice = _dedup_send_pending_notice
 
 _PREFLIGHT_READY = threading.Event()
 _PREFLIGHT_FAILED = threading.Event()
-
 _original_certify = operational_guard.certify_and_execute
 _original_live_gate = operational_guard.final_live_gate
 
@@ -151,7 +143,6 @@ def _preflight_worker() -> None:
             'completed_at': int(time.time()), 'result': result,
         }
         _PREFLIGHT_READY.set()
-        LOG.info('%s startup provenance preflight complete: %s', RUNTIME_VERSION, result.get('status'))
     except Exception as exc:
         _PREFLIGHT_FAILED.set()
         core.state['startup_preflight'] = {
@@ -174,10 +165,10 @@ def dashboard() -> str:
     html = html.replace('ETH Adaptive AI 8.4', f'{runtime_identity.PRODUCT_NAME} {runtime_identity.DISPLAY_VERSION}')
     startup_card = '''
 <style id="v25-progress-style">
-.v25stage{margin:12px 0 16px}.v25head{display:flex;justify-content:space-between;gap:12px;align-items:flex-end;margin-bottom:6px}.v25name{font-weight:700}.v25meta{font-size:12px;opacity:.72;text-align:right}.v25track{height:10px;border-radius:999px;background:#142742;overflow:hidden;border:1px solid #29466d}.v25fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#56dcb2,#6aa9ff,#9f78ff);min-width:0}.v25grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.v25pill{padding:9px 10px;border-radius:12px;background:#0b1930;border:1px solid #29466d;font-size:12px}.v25lineage{padding:8px 0;border-bottom:1px solid #203653;font-size:12px}.v25mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-word}@media(max-width:620px){.v25grid{grid-template-columns:1fr}.v25head{align-items:flex-start}.v25meta{max-width:48%}}
+.v25stage{margin:12px 0 16px}.v25head{display:flex;justify-content:space-between;gap:12px;align-items:flex-end;margin-bottom:6px}.v25name{font-weight:700}.v25meta{font-size:12px;opacity:.72;text-align:right}.v25track{height:10px;border-radius:999px;background:#142742;overflow:hidden;border:1px solid #29466d}.v25fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#56dcb2,#6aa9ff,#9f78ff);min-width:0}.v25grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.v25pill{padding:9px 10px;border-radius:12px;background:#0b1930;border:1px solid #29466d;font-size:12px}.v25lineage{padding:8px 0;border-bottom:1px solid #203653;font-size:12px}@media(max-width:620px){.v25grid{grid-template-columns:1fr}.v25head{align-items:flex-start}.v25meta{max-width:48%}}
 </style>
 <section class="card"><h2>🧭 完整學習進度 / Fixed-Horizon Final Authority</h2>
-<div id="startup19" class="notice">讀取八階段學習狀態…</div>
+<div id="startup19" class="notice">讀取完整學習狀態…</div>
 <div id="fixedHorizon" class="notice" style="margin-top:10px">讀取固定歷史截止點…</div>
 <div id="pipelineStages" style="margin-top:14px"></div>
 <div id="strategyProgress" style="margin-top:16px"></div>
@@ -189,24 +180,36 @@ def dashboard() -> str:
     script = r'''<script id="v19-startup-script">
 function v25dt(ts){if(!ts)return '—';try{return new Date(Number(ts)*1000).toLocaleString('zh-TW',{hour12:false})}catch(_){return String(ts)}}
 function v25bar(name,pct,status,meta){pct=Math.max(0,Math.min(100,Number(pct||0)));return '<div class="v25stage"><div class="v25head"><div class="v25name">'+name+'</div><div class="v25meta">'+pct.toFixed(2)+'% · '+String(status||'—')+(meta?'<br>'+meta:'')+'</div></div><div class="v25track"><div class="v25fill" style="width:'+pct+'%"></div></div></div>'}
+async function v25json(url){const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw new Error(url+' HTTP '+r.status);return r.json()}
 async function refreshStartup19(){
   const root=document.getElementById('startup19'), detail=document.getElementById('startup19detail');
   if(!root)return;
   try{
-    const [s,d]=await Promise.all([
-      fetch('/api/latest/pipeline',{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('pipeline HTTP '+r.status);return r.json()}),
-      fetch('/api/latest/progress-detail',{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('detail HTTP '+r.status);return r.json()})
-    ]);
-    const p=s.startup_preflight||{}, ok=s.operational===true, stages=s.stages||[], replay=d.replay||{}, sig=d.signal_certification||{}, ex=d.execution_audit||{}, hand=d.live_handoff||{}, tc=d.trading_contract||{};
-    root.className='notice '+(ok?'g':(p.status==='FAILED'?'r':'y'));
-    root.innerHTML='<b>'+String(s.final_status||'LEARNING')+'</b>｜整體 '+Number(s.overall_percent||0).toFixed(2)+'%<br>目前：'+String(s.active_stage||'初始化')+
+    const results=await Promise.allSettled([v25json('/api/latest/pipeline'),v25json('/api/latest/progress-detail')]);
+    const s=results[0].status==='fulfilled'?results[0].value:{};
+    const d=results[1].status==='fulfilled'?results[1].value:{};
+    const pipelineError=results[0].status==='rejected'?String(results[0].reason):'';
+    const detailError=results[1].status==='rejected'?String(results[1].reason):'';
+    const replay=d.replay||s.replay||{};
+    const sig=d.signal_certification||{};
+    const ex=d.execution_audit||{};
+    const hand=d.live_handoff||{};
+    const tc=d.trading_contract||{};
+    const p=s.startup_preflight||{};
+    const stages=Array.isArray(s.stages)?s.stages:[];
+    const ok=s.operational===true||hand.ready===true;
+    root.className='notice '+(ok?'g':((pipelineError&&detailError)?'r':'y'));
+    root.innerHTML='<b>'+String(s.final_status||s.stage||'LEARNING')+'</b>'+
+      (Number.isFinite(Number(s.overall_percent))?'｜整體 '+Number(s.overall_percent).toFixed(2)+'%':'')+
+      '<br>目前：'+String(s.active_stage||s.reason||'初始化 / 等待 API 完整可用')+
       '<br>歷史 Replay：<b>'+(replay.complete?'完成':'進行中')+'</b>｜待處理 '+String(replay.pending_eligible_decisions??'—')+
-      '<br>認證/新單：<b>'+(ok?'Signal + Execution 雙認證通過':'Fail-closed，尚不可正式下單')+'</b>';
+      '<br>認證/新單：<b>'+(ok?'Signal + Execution 雙認證通過':'Fail-closed，尚不可正式下單')+'</b>'+
+      ((pipelineError||detailError)?'<br>API：'+[pipelineError,detailError].filter(Boolean).join(' ｜ '):'');
     const fixed=document.getElementById('fixedHorizon');
-    if(fixed){fixed.className='notice '+(replay.complete?'g':'y');fixed.innerHTML='<b>固定歷史截止：</b>'+v25dt(d.fixed_replay_cutoff_ts)+'<br>此截止點不再隨現在時間移動；學習/認證期間新產生的 K 線不補進歷史 Replay。<br>策略完成後直接從當下市場開始實測，中間空窗刻意略過。'}
+    if(fixed){fixed.className='notice '+(replay.complete?'g':'y');fixed.innerHTML='<b>固定歷史截止：</b>'+v25dt(d.fixed_replay_cutoff_ts||replay.fixed_replay_cutoff_ts)+'<br>截止點不隨現在時間移動；學習期間新 K 線不補進歷史 Replay，完成後直接切當下市場。'}
     const box=document.getElementById('pipelineStages');
     if(box){
-      let rows=stages.map(x=>v25bar(String(x.name),x.percent,x.status,String(x.blocker||''))).join('');
+      let rows=stages.map(x=>v25bar(String(x.name||x.stage||'stage'),x.percent,x.status,String(x.blocker||''))).join('');
       rows+=v25bar('9. SIGNAL_CERTIFICATION',sig.percent,(sig.percent>=100?'COMPLETE':'RUNNING'),'lineage '+String(sig.terminal_lineages||0)+' / '+String(sig.expected_lineages||0)+' · candidates '+String(sig.candidates_evaluated||0));
       rows+=v25bar('10. SEALED_OOS',sig.sealed_oos_percent,(sig.sealed_oos_percent>=100?'COMPLETE':'WAITING'),'opened '+String(sig.sealed_oos_opened||0)+' / '+String(sig.expected_lineages||0));
       rows+=v25bar('11. ENTRY_SL_TP_EXECUTION_AUDIT',ex.percent,(ex.execution_champions>0?'COMPLETE':(ex.signal_champions>0?'RUNNING':'WAITING')),'Signal Champion '+String(ex.signal_champions||0)+' · Execution Champion '+String(ex.execution_champions||0));
@@ -215,12 +218,12 @@ async function refreshStartup19(){
     }
     const sp=document.getElementById('strategyProgress');
     if(sp){
-      const ls=sig.lineages||[];
+      const ls=Array.isArray(sig.lineages)?sig.lineages:[];
       let head='<h3>🧬 各策略族群 / 方向</h3><div class="v25grid"><div class="v25pill">交易標的：<b>'+String(tc.exchange||'bitget')+' '+String(tc.symbol||'ETHUSDT')+'</b></div><div class="v25pill">模擬名目：<b>'+Number(tc.paper_notional_usdt||20000).toLocaleString()+' USDT</b></div><div class="v25pill">槓桿：<b>'+String(tc.leverage_policy||'MAX_AVAILABLE_AT_ORDER_TIME')+'</b></div><div class="v25pill">Entry / SL / TP：<b>'+String(tc.entry_stop_targets_source||'EXECUTION_CHAMPION_ONLY')+'</b></div></div>';
       const lines=ls.length?ls.slice(0,40).map(x=>'<div class="v25lineage"><b>'+String(x.strategy||'—')+' '+String(x.direction||'—')+'</b> · '+String(x.status||'—')+' · gen '+String(x.generation??'—')+' · candidates '+String(x.candidates_evaluated??0)+' · PF '+Number(x.profit_factor||0).toFixed(2)+' · EV '+Number(x.expectancy_r||0).toFixed(3)+'R</div>').join(''):'<div class="v25lineage">候選族群尚未產生可顯示的 lineage 結果。</div>';
       sp.innerHTML=head+lines;
     }
-    if(detail)detail.textContent=JSON.stringify({pipeline:s,detail:d},null,2);
+    if(detail)detail.textContent=JSON.stringify({pipeline:s,detail:d,pipelineError,detailError},null,2);
   }catch(e){root.className='notice r';root.textContent='Final state 讀取失敗：'+String(e)}
 }
 refreshStartup19();setInterval(refreshStartup19,5000);
