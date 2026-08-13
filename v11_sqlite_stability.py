@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -16,7 +17,8 @@ import runtime_identity
 
 
 VERSION = runtime_identity.RUNTIME_VERSION
-BUSY_TIMEOUT_MS = 5000
+BUSY_TIMEOUT_MS = max(5000, min(60000, int(os.getenv('SQLITE_BUSY_TIMEOUT_MS', '20000'))))
+SQLITE_CACHE_KIB = max(8192, min(65536, int(os.getenv('SQLITE_CACHE_KIB', '32768'))))
 SAMPLE_COMMIT_EVERY = 14  # one complete strategy×direction decision snapshot
 DISCORD_POLL_TIMEOUT_SECONDS = 8
 
@@ -25,7 +27,16 @@ def _configure_connection(con: sqlite3.Connection) -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     con.execute(f'PRAGMA busy_timeout={BUSY_TIMEOUT_MS}')
     con.execute('PRAGMA synchronous=NORMAL')
-    con.execute('PRAGMA temp_store=MEMORY')
+    # Large GROUP BY / audit operations can otherwise consume most of an 8 GB
+    # container when SQLite keeps temporary B-trees in RAM. Spill those temporary
+    # structures to the persistent filesystem instead. The model/data semantics are
+    # unchanged; only where SQLite stores scratch pages changes.
+    con.execute('PRAGMA temp_store=FILE')
+    con.execute(f'PRAGMA cache_size=-{SQLITE_CACHE_KIB}')
+    con.execute('PRAGMA cache_spill=ON')
+    # Avoid a large memory-mapped duplicate view of the database under container RAM
+    # accounting. Ordinary page-cache IO is adequate for this workload.
+    con.execute('PRAGMA mmap_size=0')
     return con
 
 
@@ -160,6 +171,10 @@ def install(core: Any) -> None:
         'runtime_connections_do_not_repeat_wal_or_ddl': True,
         'busy_timeout_ms': BUSY_TIMEOUT_MS,
         'sample_commit_every': SAMPLE_COMMIT_EVERY,
+        'sqlite_temp_store': 'FILE',
+        'sqlite_cache_kib': SQLITE_CACHE_KIB,
+        'sqlite_cache_spill': True,
+        'sqlite_mmap_size': 0,
         'discord_poll_isolated_from_market_and_risk_loops': True,
         'learning_health_reports_running': True,
         'single_modern_boot_notice_preserved': True,

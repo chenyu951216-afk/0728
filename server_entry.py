@@ -9,6 +9,16 @@ import traceback
 from contextlib import asynccontextmanager
 from typing import Any
 
+# Bound native math-library parallelism before production imports numpy/sklearn.
+# This changes resource usage only; it does not reduce data, features, candidates,
+# validation folds, or holdout rules.
+os.environ.setdefault('OMP_NUM_THREADS', '1')
+os.environ.setdefault('OPENBLAS_NUM_THREADS', '1')
+os.environ.setdefault('MKL_NUM_THREADS', '1')
+os.environ.setdefault('NUMEXPR_NUM_THREADS', '1')
+os.environ.setdefault('VECLIB_MAXIMUM_THREADS', '1')
+os.environ.setdefault('MALLOC_ARENA_MAX', '2')
+
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -42,7 +52,7 @@ def _prepare_100_generation(production: Any) -> None:
     """Record the current migration without overriding the replay safety gate.
 
     The hierarchical pipeline owns feature-schema invalidation and will rebuild only
-    derived samples.  This bootstrap hook must never make certification ready while
+    derived samples. This bootstrap hook must never make certification ready while
     the new point-in-time replay is still incomplete.
     """
     try:
@@ -59,6 +69,10 @@ def _prepare_100_generation(production: Any) -> None:
 
 def _import_production_blocking() -> tuple[Any, Any]:
     production = importlib.import_module('server_v19')
+    # Install after server_v19 has composed the final fixed-horizon/certification
+    # authority, but before its lifespan starts any background workers.
+    transition = importlib.import_module('v26_replay_transition_stability')
+    transition.install(production.core)
     _prepare_100_generation(production)
     return production, production.app
 
