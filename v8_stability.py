@@ -136,17 +136,37 @@ async def _safe_learning(core: Any, original_learning: Callable[[], Awaitable[No
 
 
 async def _safe_monitor(core: Any) -> None:
+    """Keep idle feed hiccups visible without falsely declaring active risk protection healthy.
+
+    No open/planned position: a transient ordered-feed failure is RETRYING and new
+    entries remain blocked by the separate risk-feed gate. With a planned/open
+    position, the exact same failure is DEGRADED because stop/target monitoring is
+    safety-critical.
+    """
+    active = core.latest_signal()
+    active_risk = bool(active and active.get('status') in ('PLANNED', 'OPEN'))
     try:
         await trade_monitor.monitor_trades(core)
         probe = core.state.get('risk_feed_probe') or {}
         if probe.get('gate_trades_ok') and probe.get('coverage_complete'):
-            _ok(core, 'risk_monitor', source='gate-trades')
+            _ok(core, 'risk_monitor', source='gate-trades', active_position=active_risk)
         else:
-            _err(core, 'risk_monitor', probe.get('error') or 'ordered feed coverage incomplete', status='DEGRADED')
+            status = 'DEGRADED' if active_risk else 'RETRYING'
+            _err(
+                core, 'risk_monitor', probe.get('error') or 'ordered feed coverage incomplete',
+                status=status, active_position=active_risk,
+                new_entries_fail_closed=True,
+            )
     except Exception as exc:
-        _err(core, 'risk_monitor', exc, status='DEGRADED')
+        status = 'DEGRADED' if active_risk else 'RETRYING'
+        _err(core, 'risk_monitor', exc, status=status, active_position=active_risk, new_entries_fail_closed=True)
         probe = core.state.setdefault('risk_feed_probe', {})
-        probe.update({'gate_trades_ok': False, 'coverage_complete': False, 'error': f'monitor exception: {exc}', 'checked_at': int(time.time())})
+        text = str(exc).strip() or repr(exc)
+        probe.update({
+            'gate_trades_ok': False, 'coverage_complete': False,
+            'error': f'monitor exception: {type(exc).__name__}: {text}',
+            'checked_at': int(time.time()),
+        })
     _refresh_service(core)
 
 
