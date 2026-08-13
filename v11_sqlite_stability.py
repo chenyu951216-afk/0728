@@ -18,9 +18,13 @@ import runtime_identity
 
 VERSION = runtime_identity.RUNTIME_VERSION
 BUSY_TIMEOUT_MS = max(5000, min(60000, int(os.getenv('SQLITE_BUSY_TIMEOUT_MS', '20000'))))
-SQLITE_CACHE_KIB = max(8192, min(65536, int(os.getenv('SQLITE_CACHE_KIB', '32768'))))
+# cache_size applies per connection. Keep the default modest because replay, dashboard,
+# risk and certification can hold several concurrent SQLite connections.
+SQLITE_CACHE_KIB = max(8192, min(65536, int(os.getenv('SQLITE_CACHE_KIB', '16384'))))
 SAMPLE_COMMIT_EVERY = 14  # one complete strategy×direction decision snapshot
-DISCORD_POLL_TIMEOUT_SECONDS = 8
+# v5 Discord HTTP polling itself allows up to 15s. The outer isolation timeout must be
+# longer than the inner request timeout, otherwise healthy 9-15s responses are cancelled.
+DISCORD_POLL_TIMEOUT_SECONDS = max(20, min(60, int(os.getenv('DISCORD_POLL_OUTER_TIMEOUT_SECONDS', '25'))))
 
 
 def _configure_connection(con: sqlite3.Connection) -> sqlite3.Connection:
@@ -129,7 +133,11 @@ def _install_independent_live_loops(core: Any) -> None:
             try:
                 await asyncio.wait_for(v8_stability._safe_discord_poll(core), timeout=DISCORD_POLL_TIMEOUT_SECONDS)
             except asyncio.TimeoutError:
-                v8_stability._err(core, 'discord_poll', 'Discord poll timeout; isolated from market/risk loops', status='RETRYING')
+                v8_stability._err(
+                    core, 'discord_poll',
+                    f'Discord poll exceeded outer {DISCORD_POLL_TIMEOUT_SECONDS}s timeout; isolated from market/risk loops',
+                    status='RETRYING',
+                )
             except Exception as exc:
                 v8_stability._err(core, 'discord_poll', exc, status='DEGRADED')
             await asyncio.sleep(max(1.0, float(trade_monitor.TRADE_MONITOR_SECONDS)))
@@ -175,6 +183,7 @@ def install(core: Any) -> None:
         'sqlite_cache_kib': SQLITE_CACHE_KIB,
         'sqlite_cache_spill': True,
         'sqlite_mmap_size': 0,
+        'discord_poll_outer_timeout_seconds': DISCORD_POLL_TIMEOUT_SECONDS,
         'discord_poll_isolated_from_market_and_risk_loops': True,
         'learning_health_reports_running': True,
         'single_modern_boot_notice_preserved': True,
