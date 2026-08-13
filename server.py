@@ -108,10 +108,7 @@ install_sqlite_stability(core)
 install_clean_baseline(core)
 install_replay_cursor_integrity(core)
 install_operational_throughput(core)
-# Provider capability ranges, canonical multi-exchange price fallback and real-gap recovery.
 install_data_resilience(core)
-# Final runtime authority: matured-label replay completion, certification pipeline,
-# safe manual training and one composed live signal entrance.
 install_runtime_integrity(core)
 
 RUNTIME_VERSION = runtime_identity.RUNTIME_VERSION
@@ -186,7 +183,7 @@ def dashboard() -> str:
     )
     html = html.replace(
         "$('prob').textContent=pc(sel.probability);$('threshold').textContent=`門檻 ${pc(sel.threshold)} · ${sel.validation_stack||'等待認證'}`;",
-        "let certified=(c||[]).some(z=>z.strategy===sel.strategy&&z.direction===sel.direction);$('probTitle').textContent=certified?'Champion 信心 / 門檻':'研究分數（未認證）';$('prob').textContent=pc(sel.probability);$('threshold').textContent=certified?`門檻 ${pc(sel.threshold)} · ${sel.validation_stack||'已認證'}`:'尚無同方向 Signal Champion · 此分數僅供研究，不能觸發下單';",
+        "let champList=Array.isArray(c)?c:(Array.isArray(c?.champions)?c.champions:Array.isArray(c?.items)?c.items:[]);let certified=champList.some(z=>z&&z.strategy===sel.strategy&&z.direction===sel.direction);$('probTitle').textContent=certified?'Champion 信心 / 門檻':'研究分數（未認證）';$('prob').textContent=pc(sel.probability);$('threshold').textContent=certified?`門檻 ${pc(sel.threshold)} · ${sel.validation_stack||'已認證'}`:'尚無同方向 Signal Champion · 此分數僅供研究，不能觸發下單';",
     )
     html = html.replace(
         '<div id="learnMeta" style="margin-top:12px"></div><div id="learnError"></div></section>',
