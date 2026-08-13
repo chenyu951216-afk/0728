@@ -16,6 +16,8 @@ import v18_operational_guard as operational_guard
 import v20_historical_signal_evolution as signal_evolution
 import v21_coinglass_standard as coinglass_standard
 import v22_hierarchical_pipeline as hierarchical_pipeline
+import v16_runtime_integrity as runtime_integrity
+import v25_fixed_horizon_runtime as fixed_horizon_runtime
 from v18_final_system import install as install_final_system
 from v18_operational_guard import install as install_operational_guard
 from v20_historical_signal_evolution import install as install_signal_evolution
@@ -72,6 +74,10 @@ def _evolution_certification_due(core_obj, snap: dict, force: bool) -> bool:
     return False
 
 final_system._certification_due = _evolution_certification_due
+# 10.2 fixed-horizon contract: historical replay targets the immutable deployment
+# cutoff, certification begins only after that replay is complete, and candles that
+# arrive during learning are intentionally skipped before current-live handoff.
+fixed_horizon_runtime.install(core, runtime_integrity, final_system, signal_evolution)
 
 # Deduplicate Discord certification summaries by semantic result rather than timestamp.
 # A new generation/result still notifies; an unchanged waiting/result summary does not repeat hourly.
@@ -167,28 +173,54 @@ def dashboard() -> str:
     html = html.replace('ETH Adaptive AI 8.4.1 Certification Orchestrator', f'{runtime_identity.PRODUCT_NAME} {runtime_identity.DISPLAY_VERSION}')
     html = html.replace('ETH Adaptive AI 8.4', f'{runtime_identity.PRODUCT_NAME} {runtime_identity.DISPLAY_VERSION}')
     startup_card = '''
-<section class="card"><h2>🧭 Hierarchical Point-in-Time Learning / Final Authority</h2>
+<style id="v25-progress-style">
+.v25stage{margin:12px 0 16px}.v25head{display:flex;justify-content:space-between;gap:12px;align-items:flex-end;margin-bottom:6px}.v25name{font-weight:700}.v25meta{font-size:12px;opacity:.72;text-align:right}.v25track{height:10px;border-radius:999px;background:#142742;overflow:hidden;border:1px solid #29466d}.v25fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#56dcb2,#6aa9ff,#9f78ff);min-width:0}.v25grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.v25pill{padding:9px 10px;border-radius:12px;background:#0b1930;border:1px solid #29466d;font-size:12px}.v25lineage{padding:8px 0;border-bottom:1px solid #203653;font-size:12px}.v25mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-word}@media(max-width:620px){.v25grid{grid-template-columns:1fr}.v25head{align-items:flex-start}.v25meta{max-width:48%}}
+</style>
+<section class="card"><h2>🧭 完整學習進度 / Fixed-Horizon Final Authority</h2>
 <div id="startup19" class="notice">讀取八階段學習狀態…</div>
-<div id="pipelineStages" style="margin-top:10px"></div>
-<details><summary>查看資料、進化、sealed OOS 與 execution audit 證據</summary><pre id="startup19detail">—</pre></details></section>
+<div id="fixedHorizon" class="notice" style="margin-top:10px">讀取固定歷史截止點…</div>
+<div id="pipelineStages" style="margin-top:14px"></div>
+<div id="strategyProgress" style="margin-top:16px"></div>
+<details><summary>查看資料、候選策略、進化、sealed OOS、execution audit 與 no-lookahead 證據</summary><pre id="startup19detail">—</pre></details></section>
 '''
     marker = '</div><div class="footer">'
     if marker in html:
         html = html.replace(marker, startup_card + marker, 1)
     script = r'''<script id="v19-startup-script">
+function v25dt(ts){if(!ts)return '—';try{return new Date(Number(ts)*1000).toLocaleString('zh-TW',{hour12:false})}catch(_){return String(ts)}}
+function v25bar(name,pct,status,meta){pct=Math.max(0,Math.min(100,Number(pct||0)));return '<div class="v25stage"><div class="v25head"><div class="v25name">'+name+'</div><div class="v25meta">'+pct.toFixed(2)+'% · '+String(status||'—')+(meta?'<br>'+meta:'')+'</div></div><div class="v25track"><div class="v25fill" style="width:'+pct+'%"></div></div></div>'}
 async function refreshStartup19(){
   const root=document.getElementById('startup19'), detail=document.getElementById('startup19detail');
   if(!root)return;
   try{
-    const s=await fetch('/api/latest/pipeline',{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()});
-    const p=s.startup_preflight||{}, ok=s.operational===true, stages=s.stages||[];
+    const [s,d]=await Promise.all([
+      fetch('/api/latest/pipeline',{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('pipeline HTTP '+r.status);return r.json()}),
+      fetch('/api/latest/progress-detail',{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('detail HTTP '+r.status);return r.json()})
+    ]);
+    const p=s.startup_preflight||{}, ok=s.operational===true, stages=s.stages||[], replay=d.replay||{}, sig=d.signal_certification||{}, ex=d.execution_audit||{}, hand=d.live_handoff||{}, tc=d.trading_contract||{};
     root.className='notice '+(ok?'g':(p.status==='FAILED'?'r':'y'));
     root.innerHTML='<b>'+String(s.final_status||'LEARNING')+'</b>｜整體 '+Number(s.overall_percent||0).toFixed(2)+'%<br>目前：'+String(s.active_stage||'初始化')+
-      '<br>'+String(s.final_reason||'由 1D/4H 宏觀 → 1H/30M 結構 → 15M/5M 短線，逐時點回放且禁止重用 sealed OOS')+
-      '<br>認證/新單：<b>'+(ok?'Signal + Execution 雙認證通過':'Fail-closed，尚不可下單')+'</b>';
+      '<br>歷史 Replay：<b>'+(replay.complete?'完成':'進行中')+'</b>｜待處理 '+String(replay.pending_eligible_decisions??'—')+
+      '<br>認證/新單：<b>'+(ok?'Signal + Execution 雙認證通過':'Fail-closed，尚不可正式下單')+'</b>';
+    const fixed=document.getElementById('fixedHorizon');
+    if(fixed){fixed.className='notice '+(replay.complete?'g':'y');fixed.innerHTML='<b>固定歷史截止：</b>'+v25dt(d.fixed_replay_cutoff_ts)+'<br>此截止點不再隨現在時間移動；學習/認證期間新產生的 K 線不補進歷史 Replay。<br>策略完成後直接從當下市場開始實測，中間空窗刻意略過。'}
     const box=document.getElementById('pipelineStages');
-    if(box)box.innerHTML=stages.map(x=>'<div class="row"><span>'+String(x.name)+'</span><b>'+Number(x.percent||0).toFixed(2)+'% · '+String(x.status||'—')+'</b></div>').join('');
-    if(detail)detail.textContent=JSON.stringify(s,null,2);
+    if(box){
+      let rows=stages.map(x=>v25bar(String(x.name),x.percent,x.status,String(x.blocker||''))).join('');
+      rows+=v25bar('9. SIGNAL_CERTIFICATION',sig.percent,(sig.percent>=100?'COMPLETE':'RUNNING'),'lineage '+String(sig.terminal_lineages||0)+' / '+String(sig.expected_lineages||0)+' · candidates '+String(sig.candidates_evaluated||0));
+      rows+=v25bar('10. SEALED_OOS',sig.sealed_oos_percent,(sig.sealed_oos_percent>=100?'COMPLETE':'WAITING'),'opened '+String(sig.sealed_oos_opened||0)+' / '+String(sig.expected_lineages||0));
+      rows+=v25bar('11. ENTRY_SL_TP_EXECUTION_AUDIT',ex.percent,(ex.execution_champions>0?'COMPLETE':(ex.signal_champions>0?'RUNNING':'WAITING')),'Signal Champion '+String(ex.signal_champions||0)+' · Execution Champion '+String(ex.execution_champions||0));
+      rows+=v25bar('12. CURRENT_LIVE_HANDOFF',hand.percent,(hand.ready?'READY':'WAITING'),'完成後直接從目前時間開始，不追部署後空窗');
+      box.innerHTML=rows;
+    }
+    const sp=document.getElementById('strategyProgress');
+    if(sp){
+      const ls=sig.lineages||[];
+      let head='<h3>🧬 各策略族群 / 方向</h3><div class="v25grid"><div class="v25pill">交易標的：<b>'+String(tc.exchange||'bitget')+' '+String(tc.symbol||'ETHUSDT')+'</b></div><div class="v25pill">模擬名目：<b>'+Number(tc.paper_notional_usdt||20000).toLocaleString()+' USDT</b></div><div class="v25pill">槓桿：<b>'+String(tc.leverage_policy||'MAX_AVAILABLE_AT_ORDER_TIME')+'</b></div><div class="v25pill">Entry / SL / TP：<b>'+String(tc.entry_stop_targets_source||'EXECUTION_CHAMPION_ONLY')+'</b></div></div>';
+      const lines=ls.length?ls.slice(0,40).map(x=>'<div class="v25lineage"><b>'+String(x.strategy||'—')+' '+String(x.direction||'—')+'</b> · '+String(x.status||'—')+' · gen '+String(x.generation??'—')+' · candidates '+String(x.candidates_evaluated??0)+' · PF '+Number(x.profit_factor||0).toFixed(2)+' · EV '+Number(x.expectancy_r||0).toFixed(3)+'R</div>').join(''):'<div class="v25lineage">候選族群尚未產生可顯示的 lineage 結果。</div>';
+      sp.innerHTML=head+lines;
+    }
+    if(detail)detail.textContent=JSON.stringify({pipeline:s,detail:d},null,2);
   }catch(e){root.className='notice r';root.textContent='Final state 讀取失敗：'+String(e)}
 }
 refreshStartup19();setInterval(refreshStartup19,5000);
