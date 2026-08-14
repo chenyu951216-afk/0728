@@ -81,7 +81,7 @@ jobs:
           import json
           x=json.load(open('/tmp/ready.json'))
           assert x['ok'] is True and x['ready'] is True, x
-          assert x['startup_status'] == 'READY', x
+          assert x['startup_status'] == 'PRODUCTION_READY', x
           PY
 
       - name: Validate joint research runtime contract
