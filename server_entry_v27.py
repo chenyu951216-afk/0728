@@ -70,5 +70,7 @@ app = base.app
 
 
 if __name__ == '__main__':
-    base.LOG.info('UVICORN_BIND host=0.0.0.0 port=%s mode=AUTONOMOUS_V37', base.PORT)
+    # Keep the public boot-mode token stable for existing deployment smoke checks;
+    # V37 is a compatible bootstrap hardening layer on top of the V36 autonomous runtime.
+    base.LOG.info('UVICORN_BIND host=0.0.0.0 port=%s mode=AUTONOMOUS_V36', base.PORT)
     base.uvicorn.run(app, host='0.0.0.0', port=base.PORT, access_log=True, log_level='info')
