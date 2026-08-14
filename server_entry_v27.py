@@ -13,8 +13,10 @@ def _import_production_blocking_joint() -> tuple[Any, Any]:
 
     # Exact Taiwan research calendar: 2020-01-01 00:00 through 2026-08-01.
     # This may fetch only a previously missing first 8h, never redownload the cache.
-    os.environ['LEARNING_START_TS'] = os.getenv('AUTONOMOUS_RESEARCH_START_TS', '1577808000')
-    os.environ.setdefault('AUTONOMOUS_RESEARCH_START_TS', '1577808000')
+    research_start = os.getenv('AUTONOMOUS_RESEARCH_START_TS', '1577808000')
+    os.environ['LEARNING_START_TS'] = research_start
+    os.environ['HISTORICAL_RESEARCH_START_TS'] = research_start
+    os.environ.setdefault('AUTONOMOUS_RESEARCH_START_TS', research_start)
     os.environ.setdefault('AUTONOMOUS_RESEARCH_END_TS', '1785600000')
     os.environ.setdefault('AUTONOMOUS_SETTLEMENT_END_TS', '1786723200')
 
