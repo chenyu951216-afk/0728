@@ -125,7 +125,7 @@ jobs:
           grep -q 'autonomous-v30-js' /tmp/dashboard.html
           grep -q 'autonomous-v32-compat' /tmp/dashboard.html
           grep -q 'Autonomous Strategy Discovery' /tmp/dashboard.html
-          docker logs eth-adaptive-ci-run 2>&1 | grep -q 'UVICORN_BIND host=0.0.0.0 port=8080 mode=AUTONOMOUS_V32'
+          docker logs eth-adaptive-ci-run 2>&1 | grep -q 'UVICORN_BIND host=0.0.0.0 port=8080 mode=AUTONOMOUS_V33'
           docker logs eth-adaptive-ci-run 2>&1 | grep -q 'Uvicorn running on http://0.0.0.0:8080'
 
       - name: Show logs
