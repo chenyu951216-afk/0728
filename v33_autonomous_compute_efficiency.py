@@ -6,6 +6,10 @@ A complete candidate repeatedly touches overlapping chronological folds. Replayi
 same candidate at the same decision timestamp again adds no information, so cache that
 exact deterministic result only for the lifetime of one candidate/finalist. This cuts
 CPU without changing a single decision, feature, fill, stop, target, cost or OOS rule.
+
+The wrapper also fail-closes a candidate decision when the raw cache cannot cover its
+entire evolved maximum holding horizon. A long-horizon strategy is never silently
+marked-to-market early merely because the dataset ended.
 """
 
 import gc
@@ -27,14 +31,29 @@ def install(production: Any, autonomous: Any) -> None:
     base_simulate = autonomous._simulate_trade
     def cached_simulate(market: dict[str, Any], ts: int, features: Any, genome: dict[str, Any]):
         global _ACTIVE_CACHE, _ACTIVE_ID
-        if _ACTIVE_CACHE is None or _ACTIVE_ID is None:
-            return base_simulate(market, ts, features, genome)
-        key = (_ACTIVE_ID, int(ts))
-        cached = _ACTIVE_CACHE.get(key)
-        if cached is not None:
-            return dict(cached)
+        key = (_ACTIVE_ID or 'UNCACHED', int(ts))
+        if _ACTIVE_CACHE is not None:
+            cached = _ACTIVE_CACHE.get(key)
+            if cached is not None:
+                return dict(cached)
+
+        # The complete planned holding horizon must exist. This is deliberately
+        # conservative: a late historical decision is omitted rather than pretending
+        # the end of the available file was the AI's chosen time exit.
+        ts5 = market.get('ts5')
+        decision_close = int(ts) + 900
+        if ts5 is not None and len(ts5):
+            start = int(ts5.searchsorted(decision_close, side='left'))
+            required_end = start + int(genome.get('max_hold_bars') or 1) * 3
+            if start >= len(ts5) or required_end > len(ts5):
+                out = {'valid': False, 'filled': False, 'pnl_r': 0.0, 'reason': 'incomplete_full_evolved_holding_horizon'}
+                if _ACTIVE_CACHE is not None:
+                    _ACTIVE_CACHE[key] = dict(out)
+                return out
+
         out = base_simulate(market, ts, features, genome)
-        _ACTIVE_CACHE[key] = dict(out)
+        if _ACTIVE_CACHE is not None:
+            _ACTIVE_CACHE[key] = dict(out)
         return out
     autonomous._simulate_trade = cached_simulate
 
@@ -52,6 +71,7 @@ def install(production: Any, autonomous: Any) -> None:
                 'candidate_elapsed_seconds': round(time.monotonic() - started, 3),
                 'semantic_change': False,
                 'cache_scope': 'candidate-local deterministic only',
+                'full_evolved_holding_horizon_required': True,
                 'updated_at': int(time.time()),
             }
             _ACTIVE_CACHE = None; _ACTIVE_ID = None; gc.collect()
@@ -69,6 +89,7 @@ def install(production: Any, autonomous: Any) -> None:
                 'unique_trade_paths_simulated': len(_ACTIVE_CACHE or {}),
                 'semantic_change': False,
                 'cache_scope': 'one frozen finalist only',
+                'full_evolved_holding_horizon_required': True,
                 'updated_at': int(time.time()),
             }
             _ACTIVE_CACHE = None; _ACTIVE_ID = None; gc.collect()
@@ -78,6 +99,8 @@ def install(production: Any, autonomous: Any) -> None:
         'candidate_local_simulation_cache': True,
         'cross_candidate_cache': False,
         'cross_holdout_cache': False,
+        'full_evolved_holding_horizon_required': True,
+        'dataset_end_never_forces_fake_time_exit': True,
         'no_lookahead_changed': False,
         'candidate_population_reduced': False,
         'history_span_reduced': False,
