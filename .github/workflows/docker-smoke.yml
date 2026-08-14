@@ -32,9 +32,7 @@ jobs:
           ok=0
           for i in $(seq 1 40); do
             if curl -fsS http://127.0.0.1:18080/healthz >/tmp/health.json; then ok=1; break; fi
-            if ! docker inspect -f '{{.State.Running}}' eth-adaptive-ci-run 2>/dev/null | grep -q true; then
-              echo 'container exited before HTTP became ready'; docker logs eth-adaptive-ci-run || true; exit 1
-            fi
+            if ! docker inspect -f '{{.State.Running}}' eth-adaptive-ci-run 2>/dev/null | grep -q true; then echo 'container exited before HTTP became ready'; docker logs eth-adaptive-ci-run || true; exit 1; fi
             sleep 1
           done
           if [ "$ok" != 1 ]; then echo 'bootstrap /healthz did not become ready within 40 seconds'; docker logs eth-adaptive-ci-run || true; exit 1; fi
@@ -49,9 +47,7 @@ jobs:
           for i in $(seq 1 90); do
             code=$(curl -sS -o /tmp/auto.json -w '%{http_code}' http://127.0.0.1:18080/api/v30/autonomous || true)
             if [ "$code" = 200 ]; then ready=1; break; fi
-            if ! docker inspect -f '{{.State.Running}}' eth-adaptive-ci-run 2>/dev/null | grep -q true; then
-              echo 'container exited while loading production runtime'; docker logs eth-adaptive-ci-run || true; exit 1
-            fi
+            if ! docker inspect -f '{{.State.Running}}' eth-adaptive-ci-run 2>/dev/null | grep -q true; then echo 'container exited while loading production runtime'; docker logs eth-adaptive-ci-run || true; exit 1; fi
             sleep 1
           done
           if [ "$ready" != 1 ]; then echo 'production autonomous endpoint did not become ready within 90 seconds'; cat /tmp/auto.json || true; docker logs eth-adaptive-ci-run || true; exit 1; fi
@@ -108,7 +104,7 @@ jobs:
           grep -q 'autonomous-v30-js' /tmp/dashboard.html
           grep -q 'autonomous-v32-compat' /tmp/dashboard.html
           grep -q 'Autonomous Strategy Discovery' /tmp/dashboard.html
-          docker logs eth-adaptive-ci-run 2>&1 | grep -q 'UVICORN_BIND host=0.0.0.0 port=8080 mode=AUTONOMOUS_V35'
+          docker logs eth-adaptive-ci-run 2>&1 | grep -q 'UVICORN_BIND host=0.0.0.0 port=8080 mode=AUTONOMOUS_V36'
           docker logs eth-adaptive-ci-run 2>&1 | grep -q 'Uvicorn running on http://0.0.0.0:8080'
 
       - name: Show logs
