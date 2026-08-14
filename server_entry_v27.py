@@ -28,6 +28,7 @@ def _import_production_blocking_joint() -> tuple[Any, Any]:
     recovery = importlib.import_module('v34_autonomous_checkpoint_recovery')
     features = importlib.import_module('v35_autonomous_feature_integrity')
     leverage = importlib.import_module('v36_bitget_execution_truth')
+    fresh_bootstrap = importlib.import_module('v37_fresh_price_bootstrap')
 
     autonomous.RESET_MARKER = 'v35_autonomous_direct_r_reset_20260801_final'
     prebase = importlib.import_module('server_v17')
@@ -45,17 +46,19 @@ def _import_production_blocking_joint() -> tuple[Any, Any]:
     ui_compat.install(production, autonomous)
     recovery.install(production, autonomous)
     leverage.install(production, autonomous)
+    fresh_bootstrap.install(production.core)
 
     transition = importlib.import_module('v26_replay_transition_stability')
     transition.install(production.core)
     production.core.state['bootstrap_replica_role'] = {
         'role': role, 'pid': os.getpid(),
         'import_preflight_allowed': not role.startswith('FOLLOWER'),
-        'research_runtime': 'V36_AUTONOMOUS_DIRECT_R_FIXED_20260801',
+        'research_runtime': 'V37_AUTONOMOUS_DIRECT_R_FIXED_20260801',
         'no_strategy_templates': True, 'no_manual_regime_templates': True,
         'legacy_success_label_used': False, 'authoritative_feature_snapshots': True,
         'replay_decision_stride_15m_bars': 1, 'candidate_local_simulation_cache': True,
         'crash_safe_oos_checkpointing': True, 'bitget_max_leverage_truth': True,
+        'fresh_database_bulk_price_bootstrap': True,
         'paper_notional_usdt': 20000, 'leverage_mode': 'MAX_AVAILABLE_AT_ORDER_TIME',
     }
     base._prepare_100_generation(production)
@@ -67,5 +70,5 @@ app = base.app
 
 
 if __name__ == '__main__':
-    base.LOG.info('UVICORN_BIND host=0.0.0.0 port=%s mode=AUTONOMOUS_V36', base.PORT)
+    base.LOG.info('UVICORN_BIND host=0.0.0.0 port=%s mode=AUTONOMOUS_V37', base.PORT)
     base.uvicorn.run(app, host='0.0.0.0', port=base.PORT, access_log=True, log_level='info')
