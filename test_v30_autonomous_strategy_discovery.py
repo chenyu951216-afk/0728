@@ -96,10 +96,18 @@ def test_training_gate_quantiles_are_fit_from_training_matrix_only():
     assert 20.0 <= fitted[0]['value'] <= 30.0
 
 
-def test_production_entry_installs_autonomous_engine_before_v26_background_capture():
+def test_production_entry_installs_all_autonomous_authorities_before_v26_capture():
     text = Path('server_entry_v27.py').read_text(encoding='utf-8')
-    assert "v30_autonomous_strategy_discovery" in text
-    assert "v31_autonomous_runtime_hardening" in text
-    assert text.index('autonomous.install') < text.index("v26_replay_transition_stability")
-    assert text.index('hardening.install') < text.index("v26_replay_transition_stability")
+    for module_name in (
+        'v30_autonomous_strategy_discovery',
+        'v31_autonomous_runtime_hardening',
+        'v32_autonomous_ui_compat',
+        'v33_autonomous_compute_efficiency',
+        'v34_autonomous_checkpoint_recovery',
+    ):
+        assert module_name in text
+    capture = text.index("v26_replay_transition_stability")
+    for call in ('autonomous.install', 'hardening.install', 'compute.install', 'ui_compat.install', 'recovery.install'):
+        assert text.index(call) < capture
     assert "1577808000" in text
+    assert "HISTORICAL_RESEARCH_START_TS" in text
