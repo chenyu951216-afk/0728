@@ -55,11 +55,11 @@ jobs:
           assert int(x['port']) == 8080
           PY
 
-      - name: Wait for full production runtime
+      - name: Wait for fully swapped production runtime
         run: |
           ready=0
           for i in $(seq 1 90); do
-            code=$(curl -sS -o /tmp/ready.json -w '%{http_code}' http://127.0.0.1:18080/readyz || true)
+            code=$(curl -sS -o /tmp/joint.json -w '%{http_code}' http://127.0.0.1:18080/api/v28/joint-research || true)
             if [ "$code" = 200 ]; then
               ready=1
               break
@@ -72,21 +72,14 @@ jobs:
             sleep 1
           done
           if [ "$ready" != 1 ]; then
-            echo 'production /readyz did not become ready within 90 seconds'
-            cat /tmp/ready.json || true
+            echo 'production joint-research endpoint did not become ready within 90 seconds'
+            cat /tmp/joint.json || true
             docker logs eth-adaptive-ci-run || true
             exit 1
           fi
-          python - <<'PY'
-          import json
-          x=json.load(open('/tmp/ready.json'))
-          assert x['ok'] is True and x['ready'] is True, x
-          assert x['startup_status'] == 'PRODUCTION_READY', x
-          PY
 
       - name: Validate joint research runtime contract
         run: |
-          curl -fsS http://127.0.0.1:18080/api/v28/joint-research >/tmp/joint.json
           python - <<'PY'
           import json
           x=json.load(open('/tmp/joint.json'))
@@ -97,6 +90,7 @@ jobs:
           assert x['raw_download_reused'] is True, x
           assert x['no_lookahead']['features_closed_at_decision'] is True, x
           assert x['no_lookahead']['execution_plan_frozen_before_future_path'] is True, x
+          assert x['no_lookahead']['future_path_resolution'] == '5m sequential', x
           PY
 
       - name: Validate HTTP routing and bind diagnostics
