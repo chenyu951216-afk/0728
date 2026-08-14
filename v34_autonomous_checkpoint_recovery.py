@@ -68,7 +68,7 @@ def install(production: Any, autonomous: Any) -> None:
             diversity[key] = diversity.get(key, 0) + 1; selected.append(x)
             if len(selected) >= autonomous.MAX_CHAMPIONS:
                 break
-        selected_ids = {x['strategy_id'] for x in selected}; con = c.db()
+        con = c.db()
         try:
             con.execute(f'UPDATE {autonomous.REGISTRY_TABLE} SET active=0 WHERE 1=1')
             for rank, x in enumerate(selected, 1):
@@ -86,6 +86,19 @@ def install(production: Any, autonomous: Any) -> None:
             'active_champions': len(active),
             'inactive_nonselected': max(0, len(eligible) - len(active)),
             'inactive_rows_can_trade': False,
+            'updated_at': int(time.time()),
+        }
+        # Repair in-memory status after a restart that skipped already-audited finalists.
+        # The SQLite registry is authoritative; inactive provisional rows were never live.
+        previous = c.state.get(autonomous.STATE_KEY) or {}
+        c.state[autonomous.STATE_KEY] = {
+            **(dict(previous) if isinstance(previous, dict) else {}),
+            'schema': autonomous.SCHEMA,
+            'status': 'COMPLETE' if active else 'COMPLETE_NO_CERTIFIED_PACKAGE',
+            'champions': [
+                {'strategy_id': x['strategy_id'], 'direction': x['direction'], 'behavior_label': x['behavior_label'], **(x.get('metrics') or {})}
+                for x in active
+            ],
             'updated_at': int(time.time()),
         }
         return active
@@ -107,5 +120,6 @@ def install(production: Any, autonomous: Any) -> None:
         'provisional_oos_pass_active': False,
         'activation_requires_complete_audit_set': True,
         'restart_cannot_reopen_already_audited_holdout': True,
+        'sqlite_registry_repairs_in_memory_status_after_restart': True,
         'updated_at': int(time.time()),
     }
