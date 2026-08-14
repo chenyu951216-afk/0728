@@ -61,7 +61,6 @@ def test_future_path_starts_only_after_decision_close_and_fill_bar_gets_no_targe
     }
     result = auto._simulate_trade(market, ts, _features(), _genome())
     assert result['valid'] is True and result['filled'] is True
-    # 100.5 target is touched on the fill bar but must not receive credit.
     assert result['gross_r'] <= 1e-9
 
 
@@ -77,9 +76,7 @@ def test_intrabar_ambiguity_is_stop_first_and_missing_5m_path_is_rejected():
     }
     stopped = auto._simulate_trade(market, ts, _features(), _genome())
     assert stopped['valid'] is True and stopped['pnl_r'] < -0.99
-
-    market_gap = dict(market)
-    market_gap['ts5'] = np.array([1_900, 2_500], dtype=np.int64)
+    market_gap = dict(market); market_gap['ts5'] = np.array([1_900, 2_500], dtype=np.int64)
     invalid = auto._simulate_trade(market_gap, ts, _features(), _genome())
     assert invalid['valid'] is False
     assert invalid['reason'] == 'future_5m_gap'
@@ -87,12 +84,10 @@ def test_intrabar_ambiguity_is_stop_first_and_missing_5m_path_is_rejected():
 
 def test_training_gate_quantiles_are_fit_from_training_matrix_only():
     x = np.zeros((100, len(auto.FEATURE_NAMES)), dtype=np.float32)
-    idx = auto.FEATURE_INDEX['ret_4']
-    x[:, idx] = np.arange(100, dtype=np.float32)
+    idx = auto.FEATURE_INDEX['ret_4']; x[:, idx] = np.arange(100, dtype=np.float32)
     gate = [{'feature': 'ret_4', 'op': 'GE', 'quantile': .5}]
     fitted = auto._gate_thresholds(x[:50], gate)
     assert len(fitted) == 1
-    # It must use only the first 0..49 training slice, not the later 50..99 rows.
     assert 20.0 <= fitted[0]['value'] <= 30.0
 
 
@@ -104,10 +99,13 @@ def test_production_entry_installs_all_autonomous_authorities_before_v26_capture
         'v32_autonomous_ui_compat',
         'v33_autonomous_compute_efficiency',
         'v34_autonomous_checkpoint_recovery',
+        'v35_autonomous_feature_integrity',
     ):
         assert module_name in text
     capture = text.index("v26_replay_transition_stability")
-    for call in ('autonomous.install', 'hardening.install', 'compute.install', 'ui_compat.install', 'recovery.install'):
+    for call in ('autonomous.install', 'features.install', 'hardening.install', 'compute.install', 'ui_compat.install', 'recovery.install'):
         assert text.index(call) < capture
     assert "1577808000" in text
     assert "HISTORICAL_RESEARCH_START_TS" in text
+    assert "STRICT_REPLAY_STRIDE_BARS'] = '1'" in text
+    assert 'v35_autonomous_direct_r_reset_20260801_final' in text
