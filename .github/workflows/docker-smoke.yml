@@ -80,6 +80,8 @@ jobs:
 
       - name: Validate joint research runtime contract
         run: |
+          curl -fsS http://127.0.0.1:18080/api/latest/pipeline >/tmp/pipeline.json
+          curl -fsS http://127.0.0.1:18080/api/latest/progress-detail >/tmp/progress.json
           python - <<'PY'
           import json
           x=json.load(open('/tmp/joint.json'))
@@ -91,6 +93,21 @@ jobs:
           assert x['no_lookahead']['features_closed_at_decision'] is True, x
           assert x['no_lookahead']['execution_plan_frozen_before_future_path'] is True, x
           assert x['no_lookahead']['future_path_resolution'] == '5m sequential', x
+
+          p=json.load(open('/tmp/pipeline.json'))
+          names=[str(s.get('name') or '') for s in p.get('stages', [])]
+          assert '6. JOINT_SIGNAL_ENTRY_SL_TP_EVOLUTION' in names, p
+          assert '7. COMPLETE_PACKAGE_GENERALIZATION_CHECK' in names, p
+          assert '8. JOINT_PACKAGE_CERTIFICATION' in names, p
+          assert p['joint_signal_then_execution_separation'] is False, p
+          assert p['no_lookahead_contract']['joint_signal_and_execution_package'] is True, p
+
+          d=json.load(open('/tmp/progress.json'))
+          tc=d['trading_contract']
+          assert tc['joint_signal_entry_sl_tp_learning'] is True, d
+          assert tc['signal_source'] == 'JOINT_STRATEGY_PACKAGE_CHAMPION_ONLY', d
+          assert tc['entry_stop_targets_source'] == 'JOINT_STRATEGY_PACKAGE_CHAMPION_ONLY', d
+          assert d['signal_certification']['joint'] is True, d
           PY
 
       - name: Validate HTTP routing and bind diagnostics
@@ -98,6 +115,8 @@ jobs:
           test "$(docker inspect -f '{{.State.Running}}' eth-adaptive-ci-run)" = "true"
           curl -fsS http://127.0.0.1:18080/ >/tmp/dashboard.html
           grep -q 'ETH Adaptive AI' /tmp/dashboard.html
+          grep -q 'joint-v29-dashboard-overlay' /tmp/dashboard.html
+          grep -q 'JOINT_PACKAGE_CHAMPION_ONLY' /tmp/dashboard.html
           docker logs eth-adaptive-ci-run 2>&1 | grep -q 'UVICORN_BIND host=0.0.0.0 port=8080'
           docker logs eth-adaptive-ci-run 2>&1 | grep -q 'Uvicorn running on http://0.0.0.0:8080'
 
