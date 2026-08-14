@@ -7,19 +7,15 @@ from typing import Any
 import server_entry as base
 
 
-def _import_production_blocking_v27() -> tuple[Any, Any]:
+def _import_production_blocking_joint() -> tuple[Any, Any]:
     role = base._claim_bootstrap_role()
     os.environ['ETH_RUNTIME_BOOTSTRAP_ROLE'] = role
     production = importlib.import_module('server_v19')
 
-    # Install live lineage/generation progress plus the single-matrix candidate scorer
-    # before v26 wraps certification with its single-worker memory guard.
-    certification_progress = importlib.import_module('v27_certification_progress')
-    certification_progress.install(
-        production.core,
-        production.signal_evolution,
-        production.fixed_horizon_runtime,
-    )
+    # v28 must be installed before v26. v26 then captures the complete joint
+    # Signal+Entry+SL+TP authority and moves it to the single background worker.
+    joint = importlib.import_module('v28_joint_strategy_research')
+    joint.install(production)
 
     transition = importlib.import_module('v26_replay_transition_stability')
     transition.install(production.core)
@@ -27,17 +23,18 @@ def _import_production_blocking_v27() -> tuple[Any, Any]:
         'role': role,
         'pid': os.getpid(),
         'import_preflight_allowed': not role.startswith('FOLLOWER'),
+        'research_runtime': 'V28_JOINT_SIGNAL_ENTRY_SL_TP',
     }
     base._prepare_100_generation(production)
     return production, production.app
 
 
-# server_entry has not entered its FastAPI lifespan yet, so replacing this loader here
-# guarantees the v27 layer is active before any production background worker starts.
-base._import_production_blocking = _import_production_blocking_v27
+# Keep the historical filename because some Zeabur services already override the
+# start command to server_entry_v27.py. It now boots the v28 joint research runtime.
+base._import_production_blocking = _import_production_blocking_joint
 app = base.app
 
 
 if __name__ == '__main__':
-    base.LOG.info('UVICORN_BIND_V27 host=0.0.0.0 port=%s', base.PORT)
+    base.LOG.info('UVICORN_BIND_JOINT_V28 host=0.0.0.0 port=%s', base.PORT)
     base.uvicorn.run(app, host='0.0.0.0', port=base.PORT, access_log=True, log_level='info')
