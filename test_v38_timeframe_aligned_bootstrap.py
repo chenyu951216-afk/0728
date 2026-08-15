@@ -80,7 +80,8 @@ def test_install_replaces_only_collection_timestamp_grid_logic():
     with tempfile.TemporaryDirectory() as directory:
         cutoff = Core.START_TS + 2 * 86400
         core = Core(str(Path(directory) / 'test.db'), cutoff)
-        core.app = type('App', (), {'router': type('Router', (), {'routes': []})()})()
+        existing = type('Route', (), {'path': '/api/v38/time-alignment'})()
+        core.app = type('App', (), {'router': type('Router', (), {'routes': [existing]})()})()
 
         old_series = hierarchical._series_progress
         old_gap = hierarchical._first_collection_gap
