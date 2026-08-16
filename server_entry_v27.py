@@ -32,6 +32,7 @@ def _import_production_blocking_joint() -> tuple[Any, Any]:
     timeframe_alignment = importlib.import_module('v38_timeframe_aligned_bootstrap')
     replay_liveness = importlib.import_module('v39_replay_liveness_grid_integrity')
     handoff_integrity = importlib.import_module('v40_autonomous_handoff_integrity')
+    post_replay_scheduler = importlib.import_module('v41_post_replay_autonomous_scheduler')
 
     autonomous.RESET_MARKER = 'v35_autonomous_direct_r_reset_20260801_final'
     prebase = importlib.import_module('server_v17')
@@ -54,15 +55,17 @@ def _import_production_blocking_joint() -> tuple[Any, Any]:
     replay_liveness.install(production.core)
     handoff_integrity.install(production, autonomous)
 
-    # Install replica/near-finish stability last so followers cannot execute the
-    # V39/V40 repair/liveness/handoff authorities and the leader alone owns all
-    # mutating background loops and autonomous certification work.
+    # V26 owns the only heavy/background certification executor and replica leader
+    # fence. V41 is intentionally installed *after* it so every post-replay kick goes
+    # through that authority instead of bypassing its storage/memory/OOS safety gates.
     transition = importlib.import_module('v26_replay_transition_stability')
     transition.install(production.core)
+    post_replay_scheduler.install(production, autonomous, transition)
+
     production.core.state['bootstrap_replica_role'] = {
         'role': role, 'pid': os.getpid(),
         'import_preflight_allowed': not role.startswith('FOLLOWER'),
-        'research_runtime': 'V40_AUTONOMOUS_HANDOFF_INTEGRITY_20260816',
+        'research_runtime': 'V41_POST_REPLAY_AUTONOMOUS_SCHEDULER_20260817',
         'no_strategy_templates': True, 'no_manual_regime_templates': True,
         'legacy_success_label_used': False, 'authoritative_feature_snapshots': True,
         'replay_decision_stride_15m_bars': 1, 'candidate_local_simulation_cache': True,
@@ -76,6 +79,9 @@ def _import_production_blocking_joint() -> tuple[Any, Any]:
         'autonomous_virtual_canonical_sql_deadlock_fixed': True,
         'completed_replay_terminal_future_probe_nonblocking': True,
         'autonomous_market_cache_grid_validated': True,
+        'post_replay_autonomous_boot_kick': True,
+        'post_replay_autonomous_learning_tick_retry': True,
+        'post_replay_autonomous_scan_fallback_retry': True,
         'paper_notional_usdt': 20000, 'leverage_mode': 'MAX_AVAILABLE_AT_ORDER_TIME',
     }
     base._prepare_100_generation(production)
@@ -88,6 +94,6 @@ app = base.app
 
 if __name__ == '__main__':
     # Keep the public boot-mode token stable for existing deployment smoke checks;
-    # V40 is the final replay-to-autonomous-research handoff layer on V36-V39.
+    # V41 is the deterministic replay-complete -> autonomous-research scheduler.
     base.LOG.info('UVICORN_BIND host=0.0.0.0 port=%s mode=AUTONOMOUS_V36', base.PORT)
     base.uvicorn.run(app, host='0.0.0.0', port=base.PORT, access_log=True, log_level='info')
