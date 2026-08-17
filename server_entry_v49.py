@@ -60,6 +60,31 @@ scheduler_module._kick = _gated_v41_kick
 resource_module._scheduler_kick = _gated_v42_kick
 
 
+def _install_production_health_routes(production) -> None:
+    """Keep liveness endpoints valid before and after DynamicProductionApp swaps apps."""
+    paths = {getattr(r, 'path', None) for r in production.app.router.routes}
+    if '/healthz' not in paths:
+        @production.app.get('/healthz')
+        def production_healthz():
+            return {
+                'ok': True, 'alive': True, 'ready': True,
+                'startup_status': 'PRODUCTION_READY',
+                'startup_error_type': None, 'port': v27.base.PORT,
+                'bootstrap_replica_role': getattr(v27.base, '_BOOTSTRAP_ROLE', 'UNKNOWN'),
+                'stage6_atomic_barrier_open': bool(_STACK_READY),
+            }
+    if '/readyz' not in paths:
+        @production.app.get('/readyz')
+        def production_readyz():
+            return {
+                'ok': True, 'ready': True,
+                'startup_status': 'PRODUCTION_READY',
+                'startup_error_type': None, 'port': v27.base.PORT,
+                'bootstrap_replica_role': getattr(v27.base, '_BOOTSTRAP_ROLE', 'UNKNOWN'),
+                'stage6_atomic_barrier_open': bool(_STACK_READY),
+            }
+
+
 def _import_production_blocking_v49():
     global _STACK_READY
     production, app = _ORIGINAL_V48_IMPORT()
@@ -81,6 +106,7 @@ def _import_production_blocking_v49():
         production.core, True,
         'V30-V49 production overlays fully installed; one authoritative Stage-6 kick is now allowed',
     )
+    _install_production_health_routes(production)
 
     # scheduler._kick is V42's installed wrapper by now. Its call reaches the gated
     # resource-module function above, which delegates because _STACK_READY is true.
@@ -105,6 +131,7 @@ def _import_production_blocking_v49():
             'v47_exact_resume_identity_includes_v49': True,
             'research_semantics_changed_by_v49': False,
             'no_lookahead_changed_by_v49': False,
+            'health_routes_survive_dynamic_app_swap': True,
         })
     return production, app
 
