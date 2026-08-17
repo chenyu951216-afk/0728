@@ -17,6 +17,15 @@ class DummyAutonomous(SimpleNamespace):
     pass
 
 
+class DummyIntegrity:
+    def __init__(self):
+        self._v50_dependency_identity_installed = False
+
+    @staticmethod
+    def _semantic_code_manifest():
+        return {'module:a': 'abc123'}
+
+
 def _base_model(_genome, seed):
     return HistGradientBoostingRegressor(
         max_iter=2,
@@ -65,6 +74,18 @@ def test_model_boundary_accepts_exact_production_failure_seed_and_can_fit():
     assert state['last_original_seed'] == 83166691192533
     assert state['last_normalized_seed'] == 3239440085
     assert state['last_seed_was_out_of_range'] is True
+
+
+def test_numeric_dependency_versions_are_added_to_exact_semantic_manifest():
+    integrity = DummyIntegrity()
+    v50._install_dependency_identity(integrity)
+    manifest = integrity._semantic_code_manifest()
+
+    assert manifest['module:a'] == 'abc123'
+    versions = v50.dependency_versions()
+    for name in v50.NUMERIC_DEPENDENCIES:
+        assert manifest[f'dependency:{name}'] == versions[name]
+        assert versions[name] != 'MISSING'
 
 
 def test_known_error_detector_is_narrow():
