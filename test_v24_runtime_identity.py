@@ -65,10 +65,10 @@ def test_public_text_rewrites_obsolete_runtime_labels():
     text = runtime_identity.public_text(
         'ETH Adaptive AI 8.1 Final Replay Integrity｜v5 策略×方向｜v7 Execution Champion｜v5 runtime'
     )
-    assert 'ETH Adaptive AI 10.2' in text
+    assert f'{runtime_identity.PRODUCT_NAME} {runtime_identity.DISPLAY_VERSION}' in text
     assert '因果策略×方向' in text
     assert 'Execution Champion' in text
-    assert '10.2 runtime' in text
+    assert f'{runtime_identity.DISPLAY_VERSION} runtime' in text
     assert '8.1' not in text
     assert 'v5 策略' not in text
     assert 'v7 Execution' not in text
@@ -76,7 +76,9 @@ def test_public_text_rewrites_obsolete_runtime_labels():
 
 def test_active_dashboard_uses_latest_api_and_hides_legacy_schema_label():
     html = Path('dashboard_v721.html').read_text(encoding='utf-8')
-    assert 'ETH Adaptive AI 10.2' in html
+    # The static file is a compatibility template; production V44 rewrites its public
+    # version at the served root route. Keep this test focused on API/schema contents.
+    assert 'ETH Adaptive AI' in html
     assert '/api/latest/champions' in html
     assert '/api/latest/execution' in html
     assert '/api/latest/trade-monitor' in html
@@ -117,7 +119,7 @@ def test_unified_discord_boot_notice_is_deduplicated(monkeypatch):
 
     asyncio.run(run())
     assert len(sent) == 1
-    assert '10.2' in sent[0][0]
+    assert runtime_identity.DISPLAY_VERSION in sent[0][0]
     assert core.saved['discord_boot_public_runtime'] == runtime_identity.RUNTIME_VERSION
 
 
@@ -154,9 +156,9 @@ def test_production_discord_sender_rewrites_old_title_and_footer(monkeypatch):
     ))
     assert ok is True
     embed = captured[0]['embeds'][0]
-    assert 'ETH Adaptive AI 10.2' in embed['title']
+    assert f'{runtime_identity.PRODUCT_NAME} {runtime_identity.DISPLAY_VERSION}' in embed['title']
     assert '8.1' not in embed['title']
     assert '因果策略×方向' in embed['description']
     assert 'v7 Execution' not in embed['description']
-    assert embed['footer']['text'].startswith('ETH Adaptive AI 10.2.0-20260813')
+    assert embed['footer']['text'].startswith(f'{runtime_identity.PRODUCT_NAME} {runtime_identity.RUNTIME_VERSION}')
     assert Core.state['discord']['runtime'] == runtime_identity.RUNTIME_VERSION
