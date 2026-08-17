@@ -131,5 +131,5 @@ app = v27.base.app
 
 
 if __name__ == '__main__':
-    LOG.info('UVICORN_BIND host=0.0.0.0 port=%s mode=AUTONOMOUS_V48_CONTINUITY', v27.base.PORT)
+    LOG.info('UVICORN_BIND host=0.0.0.0 port=%s mode=AUTONOMOUS_V36 overlay=V48_RUNTIME_CONTINUITY', v27.base.PORT)
     v27.base.uvicorn.run(app, host='0.0.0.0', port=v27.base.PORT, access_log=True, log_level='info')
