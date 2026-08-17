@@ -4,16 +4,19 @@ from __future__ import annotations
 
 V49 finally surfaced the real Stage-6 failure: the autonomous evolution seed is derived
 from 12 hexadecimal SHA digits (up to 48 bits), while sklearn's legacy RandomState
-contract accepts integer seeds only in [0, 2**32 - 1].  Candidate path simulation can
+contract accepts integer seeds only in [0, 2**32 - 1]. Candidate path simulation can
 therefore finish successfully and then fail exactly when HistGradientBoostingRegressor
 is fitted.
 
-V50 fixes only that invalid interface boundary.  It does not alter historical data,
-features, genomes, folds, fills, costs, stops, targets, OOS gates, or no-lookahead
-semantics.  Every arbitrary Python integer is deterministically mapped into sklearn's
-valid uint32 seed domain.  Already-valid seeds are unchanged.
+V50 fixes that invalid interface boundary and closes the adjacent reproducibility hole:
+the exact Stage-6 run identity now also contains the installed numeric-library versions.
+It does not alter historical data, features, genomes, folds, fills, costs, stops,
+targets, OOS gates, or no-lookahead semantics. Every arbitrary Python integer is
+deterministically mapped into sklearn's valid uint32 seed domain. Already-valid seeds
+are unchanged.
 """
 
+from importlib import metadata
 import time
 from typing import Any
 
@@ -25,6 +28,7 @@ STATE_KEY = 'v50_sklearn_seed_authority'
 SKLEARN_SEED_MODULUS = 1 << 32
 SKLEARN_SEED_MAX = SKLEARN_SEED_MODULUS - 1
 KNOWN_ERROR_TOKEN = "'random_state' parameter"
+NUMERIC_DEPENDENCIES = ('numpy', 'scikit-learn', 'scipy', 'joblib', 'threadpoolctl')
 
 _INSTALLED = False
 _BASE_MODEL: Any | None = None
@@ -38,6 +42,18 @@ def normalize_sklearn_random_state(seed: Any) -> int:
     """
     value = int(seed)
     return value % SKLEARN_SEED_MODULUS
+
+
+def dependency_versions() -> dict[str, str]:
+    out: dict[str, str] = {}
+    for name in NUMERIC_DEPENDENCIES:
+        try:
+            out[name] = str(metadata.version(name))
+        except metadata.PackageNotFoundError:
+            out[name] = 'MISSING'
+        except Exception as exc:
+            out[name] = f'ERROR:{type(exc).__name__}'
+    return out
 
 
 def _state(core: Any, **patch: Any) -> dict[str, Any]:
@@ -59,6 +75,22 @@ def _known_seed_error(value: Any) -> bool:
     return KNOWN_ERROR_TOKEN in text and ('4294967295' in text or 'RandomState' in text)
 
 
+def _install_dependency_identity(integrity: Any) -> None:
+    """Make V47 exact resume identity sensitive to numeric runtime version changes."""
+    if getattr(integrity, '_v50_dependency_identity_installed', False):
+        return
+    base_manifest = integrity._semantic_code_manifest
+
+    def semantic_code_and_dependency_manifest() -> dict[str, str]:
+        out = dict(base_manifest() or {})
+        for name, version in dependency_versions().items():
+            out[f'dependency:{name}'] = version
+        return out
+
+    integrity._semantic_code_manifest = semantic_code_and_dependency_manifest
+    integrity._v50_dependency_identity_installed = True
+
+
 def _install_model_boundary(core: Any, autonomous: Any) -> None:
     global _BASE_MODEL
     if getattr(autonomous, '_v50_seed_boundary_installed', False):
@@ -74,7 +106,7 @@ def _install_model_boundary(core: Any, autonomous: Any) -> None:
             actual = model.get_params(deep=False).get('random_state')
         except Exception:
             actual = getattr(model, 'random_state', None)
-        if int(actual) != normalized:
+        if actual is None or int(actual) != normalized:
             raise RuntimeError(
                 f'sklearn random_state authority mismatch: expected {normalized}, got {actual!r}'
             )
@@ -134,16 +166,18 @@ def install(production: Any, autonomous: Any, integrity: Any, transition: Any) -
     core = production.core
 
     # This boundary changes model reproducibility for previously-invalid >32-bit seeds,
-    # therefore it must participate in V47's exact code identity before Stage 6 starts.
+    # therefore both this module and the numeric runtime versions participate in V47's
+    # exact identity before Stage 6 is allowed to start.
     modules = tuple(getattr(integrity, 'SEMANTIC_MODULES', ()))
     if 'v50_sklearn_seed_authority' not in modules:
         integrity.SEMANTIC_MODULES = modules + ('v50_sklearn_seed_authority',)
-
+    _install_dependency_identity(integrity)
     _install_model_boundary(core, autonomous)
     _heal_known_persisted_error(core, transition)
 
     example_bad = 83166691192533
     example_fixed = normalize_sklearn_random_state(example_bad)
+    versions = dependency_versions()
     _state(
         core,
         installed=True,
@@ -153,6 +187,7 @@ def install(production: Any, autonomous: Any, integrity: Any, transition: Any) -
         arbitrary_integer_seed_supported=True,
         example_original_seed=example_bad,
         example_normalized_seed=example_fixed,
+        numeric_dependencies=versions,
         rules={
             'historical_data_changed': False,
             'features_changed': False,
@@ -168,6 +203,7 @@ def install(production: Any, autonomous: Any, integrity: Any, transition: Any) -
             'valid_32bit_seeds_unchanged': True,
             'oversized_seed_mapping': 'python_int_mod_2_pow_32',
             'exact_resume_identity_includes_v50': True,
+            'exact_resume_identity_includes_numeric_dependency_versions': True,
         },
     )
 
