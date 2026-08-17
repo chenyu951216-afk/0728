@@ -13,6 +13,8 @@ import logging
 import os
 import time
 
+from fastapi.responses import JSONResponse
+
 import server_entry_v27 as v27
 
 LOG = logging.getLogger('eth-adaptive.v48-entry')
@@ -21,14 +23,12 @@ _BOOT_ID = f"bootstrap-{os.getpid()}-{int(time.time())}"
 
 
 def _bootstrap_payload(kind: str) -> dict:
-    return {
-        'ok': False, 'loading': True, 'mode': 'ROLLING_BOOTSTRAP_FAIL_CLOSED', 'kind': kind,
+    return {'ok': False, 'loading': True, 'mode': 'ROLLING_BOOTSTRAP_FAIL_CLOSED', 'kind': kind,
         'boot_id': _BOOT_ID, 'startup_status': v27.base.STARTUP_STATUS,
         'startup_error_type': v27.base.STARTUP_ERROR_TYPE,
         'bootstrap_replica_role': getattr(v27.base, '_BOOTSTRAP_ROLE', 'UNKNOWN'),
         'data_deleted': False, 'storage_truth_known': False,
-        'reason': 'production runtime is loading; endpoint unavailability is not evidence of SQLite loss',
-    }
+        'reason': 'production runtime is loading; endpoint unavailability is not evidence of SQLite loss'}
 
 
 def _install_bootstrap_compatibility_routes() -> None:
@@ -41,76 +41,67 @@ def _install_bootstrap_compatibility_routes() -> None:
     if '/api/latest/runtime-snapshot' not in paths:
         @app.get('/api/latest/runtime-snapshot')
         def bootstrap_runtime_snapshot() -> dict:
-            p = _bootstrap_payload('runtime-snapshot')
-            p.update({'storage': {'status': 'BOOTING', 'truth_known': False, 'data_deleted': False},
+            p = _bootstrap_payload('runtime-snapshot'); p.update({
+                'storage': {'status': 'BOOTING', 'truth_known': False, 'data_deleted': False},
                 'replay': {'status': 'BOOTING', 'complete': None},
                 'autonomous': {'status': 'BOOTING_RUNTIME', 'progress': {'evolution_percent': 0.0}, 'champions': [], 'active': {}},
                 'stage6': {'status': 'BOOTING_RUNTIME'}, 'exact_integrity': {'status': 'BOOTING_RUNTIME'},
-                'candidate_watchdog': {'running': False}, 'memory': {'ratio': None}})
-            return p
+                'candidate_watchdog': {'running': False}, 'memory': {'ratio': None}}); return p
 
     if '/api/v30/autonomous' not in paths:
         @app.get('/api/v30/autonomous')
-        def bootstrap_autonomous() -> dict:
-            p = _bootstrap_payload('autonomous')
-            p.update({'status': 'BOOTING_RUNTIME', 'progress': {'evolution_percent': 0.0, 'oos_percent': 0.0},
-                'champions': [], 'research_best': [], 'active': {}, 'live_ready': False, 'paper_notional_usdt': 20000})
-            return p
+        def bootstrap_autonomous():
+            p = _bootstrap_payload('autonomous'); p.update({'status': 'BOOTING_RUNTIME',
+                'progress': {'evolution_percent': 0.0, 'oos_percent': 0.0}, 'champions': [], 'research_best': [],
+                'active': {}, 'live_ready': False, 'paper_notional_usdt': 20000})
+            return JSONResponse(status_code=503, content=p)
 
     if '/api/v46/stage6-throughput' not in paths:
         @app.get('/api/v46/stage6-throughput')
         def bootstrap_v46() -> dict:
-            p = _bootstrap_payload('stage6-throughput')
-            p.update({'state': {'status': 'BOOTING_RUNTIME'}, 'memory': {'ratio': None}, 'checkpoint_counts': {}})
-            return p
+            p = _bootstrap_payload('stage6-throughput'); p.update({'state': {'status': 'BOOTING_RUNTIME'},
+                'memory': {'ratio': None}, 'checkpoint_counts': {}}); return p
 
     if '/api/v47/dataset-integrity' not in paths:
         @app.get('/api/v47/dataset-integrity')
         def bootstrap_v47() -> dict:
-            p = _bootstrap_payload('dataset-integrity')
-            p.update({'state': {'status': 'BOOTING_RUNTIME'}, 'manifest': {}, 'replay': {'complete': None}})
-            return p
+            p = _bootstrap_payload('dataset-integrity'); p.update({'state': {'status': 'BOOTING_RUNTIME'},
+                'manifest': {}, 'replay': {'complete': None}}); return p
 
     if '/api/storage/status' not in paths:
         @app.get('/api/storage/status')
         def bootstrap_storage() -> dict:
-            p = _bootstrap_payload('storage')
-            p.update({'status': 'BOOTING_RUNTIME', 'healthy': None, 'persistent_ok': None, 'database_exists': None,
-                'database_size_bytes': None, 'market_bars': None, 'learning_samples': None})
-            return p
+            p = _bootstrap_payload('storage'); p.update({'status': 'BOOTING_RUNTIME', 'healthy': None,
+                'persistent_ok': None, 'database_exists': None, 'database_size_bytes': None,
+                'market_bars': None, 'learning_samples': None}); return p
 
     if '/api/v12/baseline' not in paths:
         @app.get('/api/v12/baseline')
         def bootstrap_baseline() -> dict:
-            p = _bootstrap_payload('baseline')
-            p.update({'status': 'BOOTING', 'clean': None, 'dataset_id': None, 'certification_allowed': False})
-            return p
+            p = _bootstrap_payload('baseline'); p.update({'status': 'BOOTING', 'clean': None,
+                'dataset_id': None, 'certification_allowed': False}); return p
 
     if '/api/v17/certification' not in paths:
         @app.get('/api/v17/certification')
         def bootstrap_certification() -> dict:
-            p = _bootstrap_payload('certification')
-            p.update({'audit': {'status': 'BOOTING', 'valid': False, 'learning_samples': 0, 'decision_timestamps': 0,
-                'partial_decision_timestamps': 0}, 'certification': {'status': 'NOT_STARTED', 'reason': 'runtime loading'},
-                'pipeline': {'signal_champions': 0, 'execution_champions': 0}})
-            return p
+            p = _bootstrap_payload('certification'); p.update({'audit': {'status': 'BOOTING', 'valid': False,
+                'learning_samples': 0, 'decision_timestamps': 0, 'partial_decision_timestamps': 0},
+                'certification': {'status': 'NOT_STARTED', 'reason': 'runtime loading'},
+                'pipeline': {'signal_champions': 0, 'execution_champions': 0}}); return p
 
     if '/api/latest/pipeline' not in paths:
         @app.get('/api/latest/pipeline')
         def bootstrap_pipeline() -> dict:
-            p = _bootstrap_payload('pipeline')
-            p.update({'stage': 'BOOTING_RUNTIME', 'active_stage': 'runtime bootstrap', 'overall_percent': 0.0,
-                'operational': False, 'stages': [], 'replay': {'complete': None}})
-            return p
+            p = _bootstrap_payload('pipeline'); p.update({'stage': 'BOOTING_RUNTIME', 'active_stage': 'runtime bootstrap',
+                'overall_percent': 0.0, 'operational': False, 'stages': [], 'replay': {'complete': None}}); return p
 
     if '/api/latest/progress-detail' not in paths:
         @app.get('/api/latest/progress-detail')
         def bootstrap_progress_detail() -> dict:
-            p = _bootstrap_payload('progress-detail')
-            p.update({'replay': {'complete': None, 'pending_eligible_decisions': None}, 'signal_certification': {},
-                'execution_audit': {}, 'live_handoff': {'ready': False, 'percent': 0.0},
-                'trading_contract': {'paper_notional_usdt': 20000}})
-            return p
+            p = _bootstrap_payload('progress-detail'); p.update({'replay': {'complete': None,
+                'pending_eligible_decisions': None}, 'signal_certification': {}, 'execution_audit': {},
+                'live_handoff': {'ready': False, 'percent': 0.0},
+                'trading_contract': {'paper_notional_usdt': 20000}}); return p
 
     app.router.routes.extend(catchalls)
 
