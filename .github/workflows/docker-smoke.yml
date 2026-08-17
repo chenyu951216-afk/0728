@@ -58,6 +58,7 @@ jobs:
           curl -fsS http://127.0.0.1:18080/api/v31/autonomous-integrity >/tmp/integrity.json
           curl -fsS http://127.0.0.1:18080/api/v35/autonomous-features >/tmp/features.json
           curl -fsS http://127.0.0.1:18080/api/v43/performance >/tmp/performance.json
+          curl -fsS http://127.0.0.1:18080/api/v44/horizon >/tmp/horizon.json
           python - <<'PY'
           import json
           x=json.load(open('/tmp/auto.json'))
@@ -113,13 +114,25 @@ jobs:
           assert r['cross_candidate_result_cache'] is False, v
           assert r['vectorized_simulator_runtime_parity_guard'] is True, v
           assert r['memory_emergency_fails_closed'] is True, v
+
+          h=json.load(open('/tmp/horizon.json'))
+          assert h['schema'] == 44, h
+          assert h['runtime'] == 'V44_FIXED_RESEARCH_HORIZON_AUTHORITY', h
+          assert int(h['research_start_ts']) == 1577808000, h
+          assert int(h['research_end_exclusive_ts']) == 1785600000, h
+          assert int(h['last_historical_decision_ts']) == 1785599100, h
+          assert int(h['settlement_end_exclusive_ts']) == 1786723200, h
+          assert h['live_market_can_extend_historical_frontier'] is False, h
+          assert h['post_research_raw_data_preserved'] is True, h
+          assert h['future_peeking'] is False, h
           PY
 
       - name: Validate HTTP routing and bind diagnostics
         run: |
           test "$(docker inspect -f '{{.State.Running}}' eth-adaptive-ci-run)" = "true"
           curl -fsS http://127.0.0.1:18080/ >/tmp/dashboard.html
-          grep -q 'ETH Adaptive AI' /tmp/dashboard.html
+          grep -q 'ETH Adaptive AI 10.4' /tmp/dashboard.html
+          grep -q 'Fixed-Horizon Autonomous Strategy Research' /tmp/dashboard.html
           grep -q 'autonomous-v30-js' /tmp/dashboard.html
           grep -q 'autonomous-v32-compat' /tmp/dashboard.html
           grep -q 'Autonomous Strategy Discovery' /tmp/dashboard.html
