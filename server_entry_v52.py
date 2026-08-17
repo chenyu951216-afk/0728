@@ -57,6 +57,21 @@ def _import_production_blocking_v52():
     execution52 = importlib.import_module('v52_execution_authority')
     pipeline52 = importlib.import_module('v52_pipeline_authority')
 
+    # A promoted OOS result contains the fitted sklearn model as bytes. The vault stores
+    # that model in its BLOB column; JSON audit metadata keeps only a byte-count marker.
+    # _attach_audit resolves this global serializer at call time, so this is installed
+    # before any Stage-6/OOS work can start.
+    base_json_default = pipeline52._jd
+    def v52_json_default(value):
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            return {'__binary_model_bytes__': len(value)}
+        return base_json_default(value)
+    pipeline52._jd = v52_json_default
+
+    mods = tuple(getattr(integrity, 'SEMANTIC_MODULES', ()))
+    if 'server_entry_v52' not in mods:
+        integrity.SEMANTIC_MODULES = mods + ('server_entry_v52',)
+
     execution52.install(production, autonomous, throughput, integrity)
     pipeline52.install(production, autonomous, throughput, integrity, orchestration)
     _STACK_READY = True
