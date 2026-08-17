@@ -5,11 +5,11 @@ from typing import Any
 
 
 PRODUCT_NAME = 'ETH Adaptive AI'
-DISPLAY_VERSION = '10.2'
-API_VERSION = '10.2.0'
-BUILD_DATE = '20260813'
+DISPLAY_VERSION = '10.4'
+API_VERSION = '10.4.0'
+BUILD_DATE = '20260817'
 RUNTIME_VERSION = f'{API_VERSION}-{BUILD_DATE}'
-PUBLIC_PIPELINE_NAME = 'Causal Full-History Learning'
+PUBLIC_PIPELINE_NAME = 'Fixed-Horizon Autonomous Strategy Research'
 
 
 def public_text(value: Any) -> str:
@@ -51,6 +51,7 @@ def stamp(core: Any) -> None:
         'pipeline': PUBLIC_PIPELINE_NAME,
         'single_public_version': True,
         'legacy_state_keys_are_storage_compatibility_only': True,
+        'fixed_research_horizon_authority': True,
     }
     core.state.setdefault('strict_replay', {})['runtime'] = RUNTIME_VERSION
     core.app.version = API_VERSION
