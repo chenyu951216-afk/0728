@@ -60,6 +60,8 @@ jobs:
           curl -fsS http://127.0.0.1:18080/api/v43/performance >/tmp/performance.json
           curl -fsS http://127.0.0.1:18080/api/v44/horizon >/tmp/horizon.json
           curl -fsS http://127.0.0.1:18080/api/v49/orchestration >/tmp/v49.json
+          curl -fsS http://127.0.0.1:18080/api/v52/pipeline >/tmp/v52.json
+          curl -fsS http://127.0.0.1:18080/api/v52/strategy-vault >/tmp/v52vault.json
           python - <<'PY'
           import json
           x=json.load(open('/tmp/auto.json'))
@@ -74,8 +76,10 @@ jobs:
           assert x['walk_forward_causal'] is True, x
           assert x['future_path_after_plan_freeze_only'] is True, x
           assert float(x['paper_notional_usdt']) == 20000.0, x
-          assert x['leverage_mode'] == 'MAX_AVAILABLE_AT_ORDER_TIME', x
+          assert x['leverage_mode'] == 'MAX_SAFE_WITH_STOP_HEADROOM_AT_ORDER_TIME', x
           assert x['live_outcomes_isolated_from_historical_replay'] is True, x
+          assert 'strategy_vault' in x, x
+          assert 'current_run' in x, x
 
           p=json.load(open('/tmp/pipeline.json'))
           names=[str(s.get('name') or '') for s in p.get('stages', [])]
@@ -84,6 +88,7 @@ jobs:
           assert '8. AUTONOMOUS_PACKAGE_CERTIFICATION' in names, p
           assert '9. CURRENT_LIVE_HANDOFF' in names, p
           assert p['joint_signal_then_execution_separation'] is False, p
+          assert p['stage1_9_authority'] == 'V52_STAGE1_9_PIPELINE_AUTHORITY', p
 
           q=json.load(open('/tmp/integrity.json')); rules=q['rules']
           assert rules['storage_fail_closed'] is True, q
@@ -145,6 +150,24 @@ jobs:
           assert rr['outer_candidate_cursor_durable'] is True, z
           assert rr['normal_background_exceptions_visible_and_retryable'] is True, z
           assert rr['stage6_start_is_atomic_after_all_overlays'] is True, z
+
+          w=json.load(open('/tmp/v52.json'))
+          assert w['schema'] == 52, w
+          assert w['runtime'] == 'V52_STAGE1_9_PIPELINE_AUTHORITY', w
+          wr=w['rules']
+          assert wr['raw_history_deleted'] is False, w
+          assert wr['replay_reset'] is False, w
+          assert wr['future_price_features'] is False, w
+          assert wr['final_oos_relaxed'] is False, w
+          assert wr['strategy_saved_before_oos'] is True, w
+          assert wr['failed_oos_can_be_champion'] is False, w
+          assert w['autonomous']['leverage_mode'] == 'MAX_SAFE_WITH_STOP_HEADROOM_AT_ORDER_TIME', w
+          assert w['pipeline']['stage1_9_authority'] == 'V52_STAGE1_9_PIPELINE_AUTHORITY', w
+
+          sv=json.load(open('/tmp/v52vault.json'))
+          assert sv['schema'] == 52, sv
+          assert sv['runtime'] == 'V52_STAGE1_9_PIPELINE_AUTHORITY', sv
+          assert set(sv['counts']) == {'saved','finalists','audited','champions'}, sv
           PY
 
       - name: Validate HTTP routing and bind diagnostics
@@ -157,7 +180,7 @@ jobs:
           grep -q 'autonomous-v32-compat' /tmp/dashboard.html
           grep -q 'Autonomous Strategy Discovery' /tmp/dashboard.html
           grep -q 'Stage 6 外層提交 / 原子啟動' /tmp/dashboard.html
-          docker logs eth-adaptive-ci-run 2>&1 | grep -q 'UVICORN_BIND host=0.0.0.0 port=8080 mode=AUTONOMOUS_V36'
+          docker logs eth-adaptive-ci-run 2>&1 | grep -q 'UVICORN_BIND host=0.0.0.0 port=8080 mode=AUTONOMOUS_V36 overlay=V52_STAGE1_9_PIPELINE'
           docker logs eth-adaptive-ci-run 2>&1 | grep -q 'Uvicorn running on http://0.0.0.0:8080'
 
       - name: Show logs
