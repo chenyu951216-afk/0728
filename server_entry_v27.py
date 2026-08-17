@@ -45,6 +45,7 @@ def _import_production_blocking_joint() -> tuple[Any, Any]:
     horizon_authority = importlib.import_module('v44_fixed_research_horizon_authority')
     market_cache_alignment = importlib.import_module('v45_autonomous_market_cache_alignment')
     throughput_liveness = importlib.import_module('v46_stage6_throughput_liveness')
+    dataset_integrity = importlib.import_module('v47_dataset_integrity_authority')
 
     autonomous.RESET_MARKER = 'v35_autonomous_direct_r_reset_20260801_final'
     prebase = importlib.import_module('server_v17')
@@ -70,8 +71,8 @@ def _import_production_blocking_joint() -> tuple[Any, Any]:
     # V26 owns the single background research executor and replica leader fence.
     # V43 pre-installs the semantic-equivalent hot-path/memory guards before V42 is
     # allowed to boot-kick Stage 6. V44 fixes the immutable historical horizon, V45
-    # aligns the settlement market window, and V46 adds exact candidate resume plus
-    # bounded same-candidate simulation parallelism only after V43 parity verifies.
+    # aligns the settlement market window, V46 adds exact candidate resume/heartbeat,
+    # and V47 makes resume identity depend on every Stage-6 input/code byte.
     transition = importlib.import_module('v26_replay_transition_stability')
     transition.install(production.core)
     post_replay_scheduler.install(production, autonomous, transition)
@@ -88,11 +89,12 @@ def _import_production_blocking_joint() -> tuple[Any, Any]:
         production, autonomous, transition, post_replay_scheduler,
     )
     throughput_liveness.install(production, autonomous)
+    dataset_integrity.install(production, autonomous, throughput_liveness)
 
     production.core.state['bootstrap_replica_role'] = {
         'role': role, 'pid': os.getpid(),
         'import_preflight_allowed': not role.startswith('FOLLOWER'),
-        'research_runtime': 'V46_STAGE6_THROUGHPUT_LIVENESS_20260817',
+        'research_runtime': 'V47_DATASET_INTEGRITY_AUTHORITY_20260817',
         'no_strategy_templates': True, 'no_manual_regime_templates': True,
         'legacy_success_label_used': False, 'authoritative_feature_snapshots': True,
         'replay_decision_stride_15m_bars': 1, 'candidate_local_simulation_cache': True,
@@ -134,6 +136,11 @@ def _import_production_blocking_joint() -> tuple[Any, Any]:
         'stage6_parallel_same_candidate_paths_after_scalar_parity': True,
         'stage6_intra_candidate_heartbeat': True,
         'stage6_memory_pressure_reduces_workers_not_research_scope': True,
+        'stage6_full_exact_input_sha256': True,
+        'stage6_all_feature_and_price_bytes_hashed': True,
+        'stage6_semantic_code_hash_in_resume_identity': True,
+        'stage6_frozen_execution_contract_hash_in_resume_identity': True,
+        'stage6_any_input_difference_forces_new_run': True,
         'paper_notional_usdt': 20000, 'leverage_mode': 'MAX_AVAILABLE_AT_ORDER_TIME',
     }
     base._prepare_100_generation(production)
@@ -146,6 +153,6 @@ app = base.app
 
 if __name__ == '__main__':
     # Keep the public boot-mode token stable for existing deployment smoke checks;
-    # V46 is the final fixed-horizon + Stage-6 throughput/liveness authority.
+    # V47 is the final fixed-horizon + Stage-6 integrity/resume authority.
     base.LOG.info('UVICORN_BIND host=0.0.0.0 port=%s mode=AUTONOMOUS_V36', base.PORT)
     base.uvicorn.run(app, host='0.0.0.0', port=base.PORT, access_log=True, log_level='info')
