@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import time
 
 import server_entry_v51 as v51_entry
 import v41_post_replay_autonomous_scheduler as scheduler_module
@@ -45,6 +46,33 @@ scheduler_module._kick = _gated_scheduler_kick
 resource_module._scheduler_kick = _gated_resource_kick
 
 
+def _sync_current_paper_handoff(core, autonomous):
+    cp = core.get_state(autonomous.CHECKPOINT_KEY, {})
+    cp = dict(cp) if isinstance(cp, dict) else {}
+    champions = list(autonomous._load_registry(core, active_only=True) or [])
+    ids = [str(x.get('strategy_id')) for x in champions if x.get('strategy_id')]
+    complete = cp.get('status') == 'COMPLETE'
+    ready = bool(complete and ids)
+    handoff = dict(core.state.get('v52_current_paper_handoff') or {})
+    handoff.update({
+        'ready': ready,
+        'mode': ('CERTIFIED_CURRENT_PAPER' if ready else
+                 'PENDING_FULL_HISTORICAL_CERTIFICATION' if ids else
+                 'WAITING_FOR_CERTIFIED_CHAMPION'),
+        'strategy_ids': ids,
+        'paper_only': True,
+        'historical_replay_complete': True,
+        'historical_certification_complete': bool(complete),
+        'updated_at': int(time.time()),
+    })
+    core.state['v52_current_paper_handoff'] = handoff
+    if ready:
+        core.state.setdefault('learning', {})['phase'] = 'CURRENT_PAPER_MONITORING'
+    elif ids:
+        core.state.setdefault('learning', {})['phase'] = 'FINAL_CERTIFICATION_COMMITTING'
+    return handoff
+
+
 def _import_production_blocking_v52():
     global _STACK_READY
     production, app = _ORIGINAL_V51_IMPORT()
@@ -54,13 +82,12 @@ def _import_production_blocking_v52():
     orchestration = importlib.import_module('v49_stage6_atomic_orchestration')
     transition = importlib.import_module('v26_replay_transition_stability')
     scheduler = importlib.import_module('v41_post_replay_autonomous_scheduler')
+    pipeline_module = importlib.import_module('v22_hierarchical_pipeline')
     execution52 = importlib.import_module('v52_execution_authority')
     pipeline52 = importlib.import_module('v52_pipeline_authority')
 
     # A promoted OOS result contains the fitted sklearn model as bytes. The vault stores
     # that model in its BLOB column; JSON audit metadata keeps only a byte-count marker.
-    # _attach_audit resolves this global serializer at call time, so this is installed
-    # before any Stage-6/OOS work can start.
     base_json_default = pipeline52._jd
     def v52_json_default(value):
         if isinstance(value, (bytes, bytearray, memoryview)):
@@ -68,12 +95,57 @@ def _import_production_blocking_v52():
         return base_json_default(value)
     pipeline52._jd = v52_json_default
 
+    # Saving a champion happens inside the Stage-8 loop, before the terminal checkpoint
+    # is committed. Preserve it immediately, but do not call Current Paper READY until
+    # the whole historical certification transaction has completed.
+    base_attach_champion = pipeline52._attach_champion
+    def pending_attach_champion(core, a, result, saved):
+        base_attach_champion(core, a, result, saved)
+        h = dict(core.state.get('v52_current_paper_handoff') or {})
+        h.update({'ready': False, 'mode': 'PENDING_FULL_HISTORICAL_CERTIFICATION',
+                  'historical_certification_complete': False, 'updated_at': int(time.time())})
+        core.state['v52_current_paper_handoff'] = h
+        core.state.setdefault('learning', {})['phase'] = 'FINAL_CERTIFICATION_COMMITTING'
+    pipeline52._attach_champion = pending_attach_champion
+
     mods = tuple(getattr(integrity, 'SEMANTIC_MODULES', ()))
     if 'server_entry_v52' not in mods:
         integrity.SEMANTIC_MODULES = mods + ('server_entry_v52',)
 
     execution52.install(production, autonomous, throughput, integrity)
     pipeline52.install(production, autonomous, throughput, integrity, orchestration)
+
+    # The live signal entrance is the last hard gate. Even if a champion row is written
+    # milliseconds before Stage 8 commits COMPLETE, no present-time paper signal may be
+    # created until the terminal historical checkpoint exists.
+    base_create_signal = production.core.create_signal
+    def certified_current_paper_create(analysis, m15):
+        handoff = _sync_current_paper_handoff(production.core, autonomous)
+        if not handoff.get('ready'):
+            return None
+        return base_create_signal(analysis, m15)
+    production.core.create_signal = certified_current_paper_create
+
+    # Rebuild handoff after redeploy from durable checkpoint + champion registry, and
+    # keep both autonomous and pipeline status synchronized before presenting Stage 9.
+    base_auto_status = autonomous.autonomous_status
+    def synced_auto_status(core):
+        _sync_current_paper_handoff(core, autonomous)
+        return base_auto_status(core)
+    autonomous.autonomous_status = synced_auto_status
+
+    base_pipeline_status = pipeline_module.pipeline_status
+    def synced_pipeline_status(core):
+        _sync_current_paper_handoff(core, autonomous)
+        return base_pipeline_status(core)
+    pipeline_module.pipeline_status = synced_pipeline_status
+
+    # Clear the surfaced error from the failed V51 semantic run without touching its
+    # immutable candidate archive. The new V47 hash/run-id prevents stale reuse.
+    orchestration._state(production.core, status='READY_FOR_V52_EXACT_RUN', error=None,
+                         future_error=None, current_generation=None, current_candidate=None,
+                         outer_status='WAITING_V52_KICK', v52_recovery=True)
+    _sync_current_paper_handoff(production.core, autonomous)
     _STACK_READY = True
 
     state = production.core.state.setdefault(pipeline52.STATE_KEY, {})
@@ -99,6 +171,7 @@ def _import_production_blocking_v52():
             'stage6_stale_terminal_checkpoint_fixed': True,
             'stage1_9_truthful_progress': True,
             'current_paper_after_certified_history': True,
+            'current_paper_signal_gate_requires_terminal_checkpoint': True,
             'v47_exact_resume_identity_includes_v52': True,
             'research_data_changed_by_v52': False,
             'final_oos_thresholds_changed_by_v52': False,
