@@ -33,8 +33,8 @@ jobs:
           STRICT_MAX_QUARANTINED_GAPS: 24
         run: >-
           python -c "import os; p=os.environ['DATABASE_PATH']; [os.remove(x) for x in (p,p+'-wal',p+'-shm') if os.path.exists(x)];
-          import server, execution_v7, v5_runtime, adaptive_v5, v7_runtime, v7_learning_guard, v8_evolution, v9_final, v9_readiness, v10_final_integrity, v11_sqlite_stability, v12_clean_baseline, v13_replay_cursor_integrity, v14_operational_throughput, v15_data_resilience, v16_runtime_integrity;
-          assert server.app.version == '10.2.0'; assert server.core.state.get('runtime_version') == '10.2.0-20260813';
+          import server, execution_v7, v5_runtime, adaptive_v5, v7_runtime, v7_learning_guard, v8_evolution, v9_final, v9_readiness, v10_final_integrity, v11_sqlite_stability, v12_clean_baseline, v13_replay_cursor_integrity, v14_operational_throughput, v15_data_resilience, v16_runtime_integrity, runtime_identity;
+          assert server.app.version == runtime_identity.API_VERSION; assert server.core.state.get('runtime_version') == runtime_identity.RUNTIME_VERSION;
           assert server.core.state.get('risk_monitor_mode') == 'GATE_PUBLIC_TRADES_ORDERED'; assert server.core.state.get('stability_mode') == 'SUBSYSTEM_ISOLATED_FAIL_CLOSED';
           s=server.core.state.get('strict_replay',{}); assert s.get('htf_close_time_required') is True; assert s.get('audit_can_mutate_policy') is False;
           assert s.get('training_store',{}).get('full_span_sampling') is True; assert s.get('live_parity',{}).get('canonical_derivative_features') is True;
