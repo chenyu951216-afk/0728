@@ -57,6 +57,7 @@ jobs:
           curl -fsS http://127.0.0.1:18080/api/latest/pipeline >/tmp/pipeline.json
           curl -fsS http://127.0.0.1:18080/api/v31/autonomous-integrity >/tmp/integrity.json
           curl -fsS http://127.0.0.1:18080/api/v35/autonomous-features >/tmp/features.json
+          curl -fsS http://127.0.0.1:18080/api/v43/performance >/tmp/performance.json
           python - <<'PY'
           import json
           x=json.load(open('/tmp/auto.json'))
@@ -94,6 +95,24 @@ jobs:
           assert f['schema'] == 35, f
           assert f['source'] == 'learning_feature_snapshots.features', f
           assert f['normalized_at_timestamp_refs_are_never_parsed_as_json'] is True, f
+
+          v=json.load(open('/tmp/performance.json'))
+          assert v['runtime'] == 'V43_UNIFIED_PERFORMANCE_AUTHORITY', v
+          assert v['schema'] == 43, v
+          r=v['rules']
+          assert r['history_reduced'] is False, v
+          assert r['feature_set_reduced'] is False, v
+          assert r['population_reduced'] is False, v
+          assert r['generations_reduced'] is False, v
+          assert r['holding_horizons_reduced'] is False, v
+          assert r['oos_rules_changed'] is False, v
+          assert r['fitness_changed'] is False, v
+          assert r['cost_model_changed'] is False, v
+          assert r['stop_target_semantics_changed'] is False, v
+          assert r['future_peeking_enabled'] is False, v
+          assert r['cross_candidate_result_cache'] is False, v
+          assert r['vectorized_simulator_runtime_parity_guard'] is True, v
+          assert r['memory_emergency_fails_closed'] is True, v
           PY
 
       - name: Validate HTTP routing and bind diagnostics
