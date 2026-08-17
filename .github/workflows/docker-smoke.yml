@@ -59,6 +59,7 @@ jobs:
           curl -fsS http://127.0.0.1:18080/api/v35/autonomous-features >/tmp/features.json
           curl -fsS http://127.0.0.1:18080/api/v43/performance >/tmp/performance.json
           curl -fsS http://127.0.0.1:18080/api/v44/horizon >/tmp/horizon.json
+          curl -fsS http://127.0.0.1:18080/api/v49/orchestration >/tmp/v49.json
           python - <<'PY'
           import json
           x=json.load(open('/tmp/auto.json'))
@@ -125,6 +126,25 @@ jobs:
           assert h['live_market_can_extend_historical_frontier'] is False, h
           assert h['post_research_raw_data_preserved'] is True, h
           assert h['future_peeking'] is False, h
+
+          z=json.load(open('/tmp/v49.json'))
+          assert z['schema'] == 49, z
+          assert z['runtime'] == 'V49_STAGE6_ATOMIC_ORCHESTRATION', z
+          s=z['state']; rr=z['rules']
+          assert s['startup_barrier_open'] is True, z
+          assert rr['research_inputs_changed'] is False, z
+          assert rr['features_changed'] is False, z
+          assert rr['candidate_search_space_changed'] is False, z
+          assert rr['folds_changed'] is False, z
+          assert rr['fitness_changed'] is False, z
+          assert rr['execution_semantics_changed'] is False, z
+          assert rr['oos_rules_changed'] is False, z
+          assert rr['future_peeking_enabled'] is False, z
+          assert rr['raw_data_deleted'] is False, z
+          assert rr['replay_reset'] is False, z
+          assert rr['outer_candidate_cursor_durable'] is True, z
+          assert rr['normal_background_exceptions_visible_and_retryable'] is True, z
+          assert rr['stage6_start_is_atomic_after_all_overlays'] is True, z
           PY
 
       - name: Validate HTTP routing and bind diagnostics
@@ -136,6 +156,7 @@ jobs:
           grep -q 'autonomous-v30-js' /tmp/dashboard.html
           grep -q 'autonomous-v32-compat' /tmp/dashboard.html
           grep -q 'Autonomous Strategy Discovery' /tmp/dashboard.html
+          grep -q 'Stage 6 外層提交 / 原子啟動' /tmp/dashboard.html
           docker logs eth-adaptive-ci-run 2>&1 | grep -q 'UVICORN_BIND host=0.0.0.0 port=8080 mode=AUTONOMOUS_V36'
           docker logs eth-adaptive-ci-run 2>&1 | grep -q 'Uvicorn running on http://0.0.0.0:8080'
 
