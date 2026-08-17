@@ -3,16 +3,16 @@ from __future__ import annotations
 """Single fixed-horizon authority for replay, collection and autonomous handoff.
 
 The historical decision universe is immutable: 2020 research start through the
-configured AUTONOMOUS_RESEARCH_END_TS (exclusive).  Live candles after that point may
+configured AUTONOMOUS_RESEARCH_END_TS (exclusive). Live candles after that point may
 exist in raw storage and may be used only for outcome settlement/current-paper logic;
 they must never enlarge Strict Replay, make a completed replay fall below 100%, or
 create new historical decisions.
 
-This overlay deliberately reconciles the older fixed-deployment horizon with the
-Autonomous research horizon so every layer uses one boundary.  It preserves raw data,
-keeps no-lookahead rules intact, removes only derived rows outside the fixed decision
-window, and immediately re-kicks the existing V26/V41 background research authority
-once replay is proven complete.
+This overlay deliberately reconciles the older deployment-horizon compatibility layer,
+full-history collection, replay progress, autonomous market cache and dashboard/API to
+one research boundary. Raw data is preserved. Only derived historical rows beyond the
+fixed decision universe may be removed. No-lookahead, real-candle-only and fail-closed
+contracts remain unchanged.
 """
 
 import bisect
@@ -20,6 +20,9 @@ import os
 import time
 from typing import Any
 
+from fastapi.responses import HTMLResponse
+
+import runtime_identity
 import v5_runtime
 import v16_runtime_integrity as runtime_integrity
 import v22_hierarchical_pipeline as hierarchical
@@ -50,12 +53,13 @@ def _decision_last_open(core: Any, autonomous: Any) -> int:
 
 
 def _series_end_exclusive(core: Any, autonomous: Any, tf: str) -> int:
-    """Required raw window by role, never by the wall clock.
+    """Required raw window by role, never by wall clock.
 
-    5m is retained through settlement so long-hold autonomous candidates can be
-    evaluated honestly.  15m gets the historical generator's 33-bar maturity tail.
-    Higher timeframes stop at the research decision horizon because post-horizon bars
-    must not become historical features.
+    * 5m continues through the configured settlement horizon so frozen historical
+      trades can be resolved honestly, including long-hold autonomous candidates.
+    * 15m keeps exactly the generator's 33-bar maturity tail after the final decision.
+    * higher timeframes stop at the research end; later candles are not historical
+      features and therefore must not be required for replay completion.
     """
     research_end = _research_end(autonomous)
     if tf == '5m':
@@ -94,12 +98,22 @@ def _fixed_legal_frontier(core: Any, autonomous: Any) -> dict[str, Any]:
         }
 
     ts15 = [int(x['ts']) for x in m15]
-    last5 = int(m5[-1]['ts'])
+    ts5 = [int(x['ts']) for x in m5]
+
+    # Maturity evidence itself is bounded by the configured research/settlement
+    # contract. Current/live candles later than settlement are irrelevant here and
+    # cannot accidentally become part of the historical authority.
+    settlement_last = _settlement_end(autonomous) - int(core.TIMEFRAME_SECONDS['5m'])
+    settlement_i = bisect.bisect_right(ts5, settlement_last) - 1
+    last5 = int(ts5[settlement_i]) if settlement_i >= 0 else 0
+    maturity_15m_last = _research_end(autonomous) + 32 * int(core.TIMEFRAME_SECONDS['15m'])
+    maturity_15m_i = bisect.bisect_right(ts15, maturity_15m_last) - 1
+
     # Preserve the original causal maturity rules: a decision needs 96 future 5m
     # candles after its close and the generator requires a 33x15m maturity tail.
     max_open_from_5m = last5 - 900 - 95 * 300
     max_i_from_5m = bisect.bisect_right(ts15, max_open_from_5m) - 1
-    max_i_from_15m = len(ts15) - 34
+    max_i_from_15m = maturity_15m_i - 33
     desired_i = bisect.bisect_right(ts15, desired) - 1
     i = min(desired_i, max_i_from_5m, max_i_from_15m)
     stride = max(1, int(os.getenv('STRICT_REPLAY_STRIDE_BARS', '1')))
@@ -111,7 +125,7 @@ def _fixed_legal_frontier(core: Any, autonomous: Any) -> dict[str, Any]:
             'latest_market_ts': int(ts15[-1]),
             'legal_frontier_ts': int(core.START_TS),
             'legal_frontier_index': None,
-            'latest_5m_ts': last5,
+            'latest_5m_ts': last5 or None,
             'fixed_research_start_ts': _research_start(autonomous),
             'fixed_research_end_exclusive_ts': _research_end(autonomous),
             'fixed_research_last_decision_ts': desired,
@@ -130,6 +144,7 @@ def _fixed_legal_frontier(core: Any, autonomous: Any) -> dict[str, Any]:
         'fixed_research_start_ts': _research_start(autonomous),
         'fixed_research_end_exclusive_ts': _research_end(autonomous),
         'fixed_research_last_decision_ts': desired,
+        'fixed_settlement_end_exclusive_ts': _settlement_end(autonomous),
         'moving_frontier': False,
         'research_horizon_reached': legal >= desired,
         'reason': 'immutable autonomous research horizon; live/post-cutoff candles cannot enlarge historical replay',
@@ -159,6 +174,65 @@ def _prune_derived_after_horizon(core: Any, legal_ts: int) -> dict[str, int]:
     return deleted
 
 
+def _replace_progress_detail_route(core: Any, autonomous: Any) -> None:
+    """Make the public/API progress card consume the same V44 replay authority."""
+    app = getattr(core, 'app', None)
+    if app is None:
+        return
+    routes = list(getattr(app.router, 'routes', []) or [])
+    old = next((r for r in routes if getattr(r, 'path', None) == '/api/latest/progress-detail'), None)
+    old_endpoint = getattr(old, 'endpoint', None)
+    if old is not None:
+        app.router.routes = [r for r in app.router.routes if getattr(r, 'path', None) != '/api/latest/progress-detail']
+
+    @app.get('/api/latest/progress-detail')
+    def progress_detail_v44() -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if callable(old_endpoint):
+            try:
+                raw = old_endpoint()
+                payload = dict(raw) if isinstance(raw, dict) else {}
+            except Exception as exc:
+                payload = {'compatibility_view_error': f'{type(exc).__name__}: {exc}'}
+        replay = dict(runtime_integrity.replay_progress(core) or {})
+        payload.update({
+            'schema': SCHEMA,
+            'runtime': runtime_identity.RUNTIME_VERSION,
+            'fixed_replay_cutoff_ts': _research_end(autonomous),
+            'fixed_replay_cutoff_is_immutable': True,
+            'fixed_research_start_ts': _research_start(autonomous),
+            'fixed_research_end_exclusive_ts': _research_end(autonomous),
+            'last_historical_decision_ts': _decision_last_open(core, autonomous),
+            'settlement_end_exclusive_ts': _settlement_end(autonomous),
+            'replay': replay,
+            'post_research_live_candles_replayed_as_history': False,
+            'post_research_data_role': 'SETTLEMENT_OR_CURRENT_PAPER_ONLY',
+        })
+        return payload
+
+
+def _replace_dashboard_route(core: Any) -> None:
+    """Remove stale 10.2/full-history labels from the actual served dashboard."""
+    app = getattr(core, 'app', None)
+    if app is None:
+        return
+    routes = list(getattr(app.router, 'routes', []) or [])
+    old = next((r for r in routes if getattr(r, 'path', None) == '/'), None)
+    old_endpoint = getattr(old, 'endpoint', None)
+    if not callable(old_endpoint):
+        return
+    app.router.routes = [r for r in app.router.routes if getattr(r, 'path', None) != '/']
+
+    @app.get('/', response_class=HTMLResponse)
+    def dashboard_v44() -> str:
+        html = str(old_endpoint())
+        html = html.replace('ETH Adaptive AI 10.2', f'{runtime_identity.PRODUCT_NAME} {runtime_identity.DISPLAY_VERSION}')
+        html = html.replace('Causal Full-History Learning', runtime_identity.PUBLIC_PIPELINE_NAME)
+        html = html.replace('2020→現在 K 線覆蓋（直接查 DB）', '固定研究資料覆蓋（直接查 DB）')
+        html = html.replace('2020→現在 K 線覆蓋', '固定研究資料覆蓋')
+        return html
+
+
 def install(
     production: Any,
     autonomous: Any,
@@ -171,13 +245,12 @@ def install(
         return
     core._v44_fixed_research_horizon_installed = True
 
-    # One source of truth for collection windows.  V39's grid-safe progress/gap code
-    # calls this helper dynamically, so the stricter per-timeframe horizons propagate
-    # without duplicating its SQL integrity logic.
+    # One source of truth for collection windows. V39's grid-safe progress/gap code
+    # calls this helper dynamically, so the role-specific horizons propagate without
+    # duplicating its SQL integrity checks.
     alignment._aligned_series_window = lambda c, tf: _aligned_series_window(c, autonomous, tf)
 
     # The legacy deployment-time cutoff must no longer define the replay decision set.
-    # Keep the compatibility key/API but make it report the autonomous research end.
     fixed_horizon._cutoff = lambda _c: _research_end(autonomous)
     fixed_horizon._fixed_legal_frontier = lambda c: _fixed_legal_frontier(c, autonomous)
     runtime_integrity._legal_frontier = lambda c: _fixed_legal_frontier(c, autonomous)
@@ -190,8 +263,8 @@ def install(
         legal = int(frontier.get('legal_frontier_ts') or c.START_TS)
         desired = int(frontier.get('fixed_research_last_decision_ts') or _decision_last_open(c, autonomous))
         cursor = int(c.get_state(v5_runtime.REPLAY_STATE_KEY, c.START_TS) or c.START_TS)
-        # Completion is allowed only when the maturity checks actually reach the fixed
-        # last decision.  This prevents a partial dataset from being painted green.
+        # Completion is allowed only when real maturity data actually reaches the fixed
+        # last decision. A partial dataset therefore cannot be painted green.
         horizon_ready = bool(frontier.get('ready') and legal >= desired)
         complete = bool(horizon_ready and cursor >= desired)
         out.update({
@@ -218,7 +291,6 @@ def install(
     runtime_integrity.replay_progress = fixed_progress
 
     frontier = _fixed_legal_frontier(core, autonomous)
-    legal = int(frontier.get('legal_frontier_ts') or core.START_TS)
     desired = int(frontier.get('fixed_research_last_decision_ts') or _decision_last_open(core, autonomous))
     pruned = _prune_derived_after_horizon(core, desired)
     cursor = int(core.get_state(v5_runtime.REPLAY_STATE_KEY, core.START_TS) or core.START_TS)
@@ -243,6 +315,7 @@ def install(
     core.state[STATE_KEY] = {
         'schema': SCHEMA,
         'runtime': VERSION,
+        'public_runtime': runtime_identity.RUNTIME_VERSION,
         'research_start_ts': _research_start(autonomous),
         'research_end_exclusive_ts': _research_end(autonomous),
         'last_historical_decision_ts': desired,
@@ -270,8 +343,11 @@ def install(
         'no_lookahead_unchanged': True,
     }
 
+    _replace_progress_detail_route(core, autonomous)
+    _replace_dashboard_route(core)
+
     # Prime V42's immutable O(1) completed view and immediately wake the existing
-    # V26/V41 scheduler.  No direct model training bypass is introduced here.
+    # V26/V41 scheduler. No direct model-training bypass is introduced here.
     if snap.get('complete'):
         try:
             resource_authority._freeze_completed_replay_view(core, autonomous)
