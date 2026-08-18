@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sqlite3
-from types import SimpleNamespace
 
 import numpy as np
 
@@ -28,8 +27,6 @@ class FakeCore:
         self._con = sqlite3.connect(':memory:')
 
     def db(self):
-        # Return lightweight wrappers around the same in-memory DB. Tests that use it
-        # do not close through this fake; execution-only tests do not touch DB.
         return self._con
 
     def get_state(self, key, default=None):
@@ -106,11 +103,11 @@ def test_historical_market_stop_is_anchored_to_actual_fill(monkeypatch):
     )
     result = v56.canonical_simulate(FakeCore(), FakeAutonomous, m, 0,
                                     np.asarray([.01, .2], dtype=np.float32), genome())
-    # ATR is derived from the decision close (100 * 1% = 1), but stop anchor is the
-    # actual first executable 5m open (110), therefore 109 -- never the old planned 99.
+    # ATR arrives as float32 in the production feature matrix, so compare at a
+    # numerically appropriate tolerance while still proving the 110 -> 109 anchor.
     assert result['valid'] is True and result['filled'] is True
     assert result['entry'] == 110.0
-    assert abs(result['stop'] - 109.0) < 1e-9
+    assert abs(result['stop'] - 109.0) < 1e-6
 
 
 def test_stop_wins_same_bar_ambiguity(monkeypatch):
@@ -143,11 +140,10 @@ def test_trailing_lock_is_never_above_reached_excursion(monkeypatch):
     result = v56.canonical_simulate(FakeCore(), FakeAutonomous, m, 0,
                                     np.asarray([.01, .2], dtype=np.float32), g)
     assert result['exit_reason'] == 'STOP_OR_TRAIL'
-    assert result['exit_price'] <= 100.45 + 1e-9
+    assert result['exit_price'] <= 100.45 + 1e-6
 
 
 def test_forward_observation_cannot_settle_before_full_horizon():
-    # The due timestamp is decision close + the entire evolved max holding horizon.
     g = genome(max_hold_bars=48)
     decision = 1_000_000
     canon = v56._canonical_genome(g)
