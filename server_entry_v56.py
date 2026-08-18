@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Production entry for V56 causal execution parity and current forward learning.
 
-Stage 6 is fenced before importing the V55 stack.  This matters because V56 changes
+Stage 6 is fenced before importing the V55 stack. This matters because V56 changes
 execution semantics (MARKET fill anchoring / trailing feasibility), so not one Stage-6
 candidate may start under the previous simulator and later resume under V56.
 """
@@ -15,7 +15,7 @@ import v42_post_replay_resource_authority as resource_module
 
 LOG = logging.getLogger('eth-adaptive.v56-entry')
 
-# Install the deepest gate BEFORE importing V55/V54/V53/... .  Inner entries may wrap
+# Install the deepest gate BEFORE importing V55/V54/V53/... . Inner entries may wrap
 # this function, but every kick ultimately reaches this closed gate until V56 is ready.
 _PRE_V56_SCHEDULER_KICK = scheduler_module._kick
 _PRE_V56_RESOURCE_KICK = resource_module._scheduler_kick
@@ -70,10 +70,13 @@ def _import_production_blocking_v56():
     transition = importlib.import_module('v26_replay_transition_stability')
     scheduler = importlib.import_module('v41_post_replay_autonomous_scheduler')
     v56 = importlib.import_module('v56_causal_multichampion_learning')
+    parallel = importlib.import_module('v56_parallel_authority')
 
-    # Preinstall changes the exact V47 semantic fingerprint and canonical simulator.
-    # Install then adds current-paper execution parity, arbitration and forward learning.
+    # All semantic modules are installed while the deepest scheduler gate is closed.
+    # V47 therefore hashes the exact V56 simulator + dispatcher before any candidate
+    # can be resumed or computed.
     v56.preinstall(production, autonomous, integrity, throughput)
+    parallel.install(production, autonomous, integrity)
     v56.install(production, autonomous, integrity, throughput)
 
     _V56_READY = True
@@ -84,7 +87,7 @@ def _import_production_blocking_v56():
     )
     orchestration.mark_startup_barrier(
         production.core, True,
-        'V56 canonical execution + multi-Champion current-learning stack is fully installed',
+        'V56 canonical execution + bounded parallel + multi-Champion current-learning stack is fully installed',
     )
 
     try:
@@ -107,6 +110,7 @@ def _import_production_blocking_v56():
             'current_forward_learning_after_handoff': True,
             'historical_oos_immutable_after_handoff': True,
             'online_challenger_future_only_validation': True,
+            'v56_bounded_path_workers': True,
             'v47_exact_resume_identity_includes_v56': True,
         })
     return production, app
