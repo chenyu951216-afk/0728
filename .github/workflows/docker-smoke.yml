@@ -63,6 +63,7 @@ jobs:
           curl -fsS http://127.0.0.1:18080/api/v52/pipeline >/tmp/v52.json
           curl -fsS http://127.0.0.1:18080/api/v52/strategy-vault >/tmp/v52vault.json
           curl -fsS http://127.0.0.1:18080/api/v53/terminal-handoff >/tmp/v53.json
+          curl -fsS http://127.0.0.1:18080/api/v54/runtime-authority >/tmp/v54.json
           python - <<'PY'
           import json
           x=json.load(open('/tmp/auto.json'))
@@ -174,6 +175,18 @@ jobs:
           assert t['schema'] == 53, t
           assert t['runtime'] == 'V53_TERMINAL_HANDOFF_RECOVERY', t
           assert t['status'] in {'WAITING_FOR_AUTHORITATIVE_TERMINAL_COMMIT','TERMINAL_CHECKPOINT_AUTHORITATIVE','TERMINAL_COMMIT_RECOVERED_FROM_DURABLE_OOS'}, t
+
+          a54=json.load(open('/tmp/v54.json'))
+          assert a54['schema'] == 54, a54
+          assert a54['runtime'] == 'V54_TERMINAL_RUNTIME_AUTHORITY', a54
+          assert a54['research_semantics_changed'] is False, a54
+          assert a54['v47_identity_changed'] is False, a54
+          assert a54['historical_data_deleted'] is False, a54
+          assert a54['replay_reset'] is False, a54
+          assert a54['oos_thresholds_changed'] is False, a54
+          assert a54['future_peeking_enabled'] is False, a54
+          assert int(a54['simulation_worker_cap']) <= 2, a54
+          assert int(a54['simulation_chunk']) <= 32, a54
           PY
 
       - name: Validate HTTP routing and bind diagnostics
@@ -186,7 +199,8 @@ jobs:
           grep -q 'autonomous-v32-compat' /tmp/dashboard.html
           grep -q 'Autonomous Strategy Discovery' /tmp/dashboard.html
           grep -q 'Stage 6 外層提交 / 原子啟動' /tmp/dashboard.html
-          docker logs eth-adaptive-ci-run 2>&1 | grep -q 'UVICORN_BIND host=0.0.0.0 port=8080 mode=AUTONOMOUS_V36 overlay=V53_TERMINAL_HANDOFF'
+          grep -q 'Stage 1–9 最終權威 / Runtime Convergence' /tmp/dashboard.html
+          docker logs eth-adaptive-ci-run 2>&1 | grep -q 'UVICORN_BIND host=0.0.0.0 port=8080 mode=AUTONOMOUS_V36 overlay=V54_TERMINAL_RUNTIME'
           docker logs eth-adaptive-ci-run 2>&1 | grep -q 'Uvicorn running on http://0.0.0.0:8080'
 
       - name: Show logs
