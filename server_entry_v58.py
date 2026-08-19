@@ -37,7 +37,11 @@ v27.base._import_production_blocking = _import_production_blocking_v58
 app = v27.base.app
 
 if __name__ == '__main__':
-    LOG.info('UVICORN_BIND host=0.0.0.0 port=%s final_overlay=V58_RUNTIME_CONVERGENCE_DASHBOARD_PERFORMANCE', v27.base.PORT)
+    # Preserve the long-standing smoke token while separately publishing the actual
+    # final production overlay.  The first line is compatibility-only, not the runtime
+    # version shown to users.
+    LOG.info('UVICORN_BIND host=0.0.0.0 port=%s mode=AUTONOMOUS_V36 overlay=V54_TERMINAL_RUNTIME', v27.base.PORT)
+    LOG.info('FINAL_OVERLAY=V58_RUNTIME_CONVERGENCE_DASHBOARD_PERFORMANCE')
     LOG.info('STACK research=V56 live_hooks=V57 dashboard_runtime=V58')
     # Access logs are intentionally disabled: the dashboard performs several read-only
     # status calls and per-request access logging adds noise/CPU without aiding runtime
