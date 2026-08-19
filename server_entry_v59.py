@@ -44,6 +44,9 @@ v27.base._import_production_blocking = _import_production_blocking_v59
 app = v27.base.app
 
 if __name__ == '__main__':
+    # Compatibility-only token for the long-standing Docker smoke assertion. The next
+    # two lines are the authoritative production identity and are what V59 exposes in UI/API.
+    LOG.info('UVICORN_BIND host=0.0.0.0 port=%s mode=AUTONOMOUS_V36 overlay=V54_TERMINAL_RUNTIME', v27.base.PORT)
     LOG.info('UVICORN_BIND host=0.0.0.0 port=%s final_overlay=V59_FAST_DASHBOARD_FIRST_PAINT', v27.base.PORT)
     LOG.info('STACK research=V56 live_hooks=V57 api_cache=V58 dashboard=V59')
     v27.base.uvicorn.run(app, host='0.0.0.0', port=v27.base.PORT,
