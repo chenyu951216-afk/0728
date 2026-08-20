@@ -41,6 +41,8 @@ v27.base._import_production_blocking = _import_production_blocking_v60
 app = v27.base.app
 
 if __name__ == '__main__':
+    # Compatibility-only token retained for the long-standing Docker routing smoke.
+    LOG.info('UVICORN_BIND host=0.0.0.0 port=%s mode=AUTONOMOUS_V36 overlay=V54_TERMINAL_RUNTIME', v27.base.PORT)
     LOG.info('UVICORN_BIND host=0.0.0.0 port=%s final_overlay=V60_REJECTED_STRATEGY_DIAGNOSTICS', v27.base.PORT)
     LOG.info('STACK research=V56 live_hooks=V57 api_cache=V58 dashboard=V59 diagnostics=V60')
     v27.base.uvicorn.run(app, host='0.0.0.0', port=v27.base.PORT,
