@@ -3,8 +3,13 @@ from __future__ import annotations
 """V66 forced Current-Time handoff and strategy-explainer authority.
 
 V56 remains execution/forward-learning authority; V63 remains score authority.
-V66 only adds a sticky current-time handoff guard and makes every persisted strategy
-legible at the top of the dashboard. Historical OOS/model semantics are unchanged.
+V65 owns completed-strategy roster reconciliation. V66 makes the Current-Time contract
+explicit and fail-closed: with no position, every completed active strategy must be
+present in the same live analysis before a new signal can be created. Each strategy is
+judged independently first; only simultaneously-qualified strategies are compared and
+the highest current score wins.
+
+Historical OOS/model semantics are unchanged and no future feature is used.
 """
 
 import math
@@ -17,6 +22,7 @@ VERSION = "V66_FORCED_CURRENT_TIME_STRATEGY_EXPLAINER"
 SCHEMA = 66
 STATE_KEY = "v66_forced_current_time_strategy_explainer"
 MODE_KEY = "forced_runtime_mode_v66"
+V65_STATE_KEY = "v65_multistrategy_position_authority"
 _INSTALLED = False
 
 
@@ -46,6 +52,7 @@ def _state(core: Any, **patch: Any) -> dict[str, Any]:
         "mode": z.get("mode"),
         "latched_current_time": bool(z.get("latched_current_time")),
         "historical_restart_suppressed": bool(z.get("historical_restart_suppressed")),
+        "parallel_roster_ready": bool(_d(z.get("parallel_current_time")).get("ready_for_new_entry")),
         "updated_at": z["updated_at"],
     }
     return z
@@ -64,17 +71,21 @@ def refresh_mode(core: Any, autonomous: Any, *, source: str) -> dict[str, Any]:
     cp = _d(core.get_state(autonomous.CHECKPOINT_KEY, {}))
     strategies = _active_strategies(core, autonomous)
     terminal = str(cp.get("status") or "") == "COMPLETE"
-    latched = bool(old.get("latched_current_time"))
+
+    # Sticky only while the same terminal historical checkpoint remains authoritative.
+    # A genuine semantic reset that makes the checkpoint non-terminal is allowed to
+    # return to historical research; ordinary service restarts are not.
+    latched = bool(old.get("latched_current_time")) if terminal else False
     if not latched and terminal and strategies:
         latched = True
 
     if latched:
         mode = "CURRENT_TIME_PAPER"
-        reason = ("歷史研發/OOS 已完成並保存可執行策略；已強制鎖定現在時間 Paper，"
-                  "禁止自動回退或重跑歷史 Stage 6。")
+        reason = ("歷史研發/OOS 已完成並保存可執行策略；已強制鎖定現在時間 Paper。"
+                  "無持倉時所有完成策略必須同輪判斷，禁止只用部分策略開新單。")
     elif terminal:
         mode = "POST_OOS_WAITING_STRATEGY_PERSIST"
-        reason = "歷史 checkpoint 已完成，等待可執行策略保存；不會因此重啟歷史研發。"
+        reason = "歷史 checkpoint 已完成，等待完整可執行策略 roster 保存；不會重啟歷史研發。"
     else:
         mode = "HISTORICAL_RESEARCH"
         reason = "歷史研發尚未完成 terminal handoff。"
@@ -92,6 +103,8 @@ def refresh_mode(core: Any, autonomous: Any, *, source: str) -> dict[str, Any]:
         active_strategy_ids=[str(x.get("strategy_id")) for x in strategies],
         historical_restart_suppressed=latched,
         current_scan_must_use_live_bundle=latched,
+        all_completed_strategies_same_scan_required=latched,
+        partial_strategy_roster_may_open_new_signal=False,
         discord_signal_lifecycle_required=True,
         no_future_features=True,
         historical_oos_frozen=latched,
@@ -99,14 +112,87 @@ def refresh_mode(core: Any, autonomous: Any, *, source: str) -> dict[str, Any]:
     )
 
 
+def _parallel_roster(core: Any, autonomous: Any,
+                     analysis: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Prove that the current decision actually evaluated every active completed strategy."""
+    registry = _active_strategies(core, autonomous)
+    active_ids = [str(x.get("strategy_id") or "") for x in registry if x.get("strategy_id")]
+    active_set = set(active_ids)
+
+    current = _d(analysis) if isinstance(analysis, dict) else _d(core.state.get("v63_current_analysis"))
+    diagnostics = list(current.get("strategy_diagnostics") or current.get("autonomous_candidates") or [])
+    evaluated_ids = [str(x.get("strategy") or "") for x in diagnostics if x.get("strategy")]
+    evaluated_set = set(evaluated_ids)
+    missing = sorted(active_set - evaluated_set)
+    unexpected = sorted(evaluated_set - active_set)
+    qualified = [x for x in diagnostics if bool(x.get("qualified"))]
+    qualified.sort(key=lambda x: (_f(x.get("v63_live_score"), -999.0),
+                                  _f(x.get("edge_r"), -999.0)), reverse=True)
+
+    v65 = _d(core.state.get(V65_STATE_KEY))
+    roster_authority_ready = bool(v65.get("current_time_roster_ready"))
+    all_evaluated = bool(active_ids) and not missing and not unexpected and len(evaluated_ids) == len(active_ids)
+    ready = bool(roster_authority_ready and all_evaluated)
+    selected = _d(current.get("selection"))
+
+    return {
+        "completed_strategy_count": len(active_ids),
+        "completed_strategy_ids": active_ids,
+        "evaluated_strategy_count": len(evaluated_ids),
+        "evaluated_strategy_ids": evaluated_ids,
+        "all_completed_evaluated_same_scan": all_evaluated,
+        "missing_from_current_scan": missing,
+        "unexpected_in_current_scan": unexpected,
+        "qualified_count": len(qualified),
+        "qualified_strategy_ids": [str(x.get("strategy")) for x in qualified],
+        "best_qualified_strategy": str(qualified[0].get("strategy")) if qualified else None,
+        "selected_strategy": selected.get("strategy"),
+        "selected_tradeable": bool(selected.get("tradeable")),
+        "v65_roster_authority_ready": roster_authority_ready,
+        "v65_expected_strategy_count": int(v65.get("completed_current_time_strategy_count") or 0),
+        "v65_missing_strategy_ids": list(v65.get("missing_current_time_strategy_ids") or []),
+        "ready_for_new_entry": ready,
+        "entry_fail_closed": not ready,
+        "rule_zh": (
+            "無持倉時先讓所有完成策略各自判斷；0 套有訊號就 WAIT，1 套有訊號就用該套，"
+            "2 套以上同時有訊號才依 Current-Time 分數選最高者。"
+        ),
+    }
+
+
 def _scan_wrapper(core: Any, autonomous: Any, base_scan: Callable[..., Any]):
     async def scan(*args: Any, **kwargs: Any) -> Any:
         refresh_mode(core, autonomous, source="scan_before")
+        result: Any = None
         try:
-            return await base_scan(*args, **kwargs)
+            result = await base_scan(*args, **kwargs)
+            return result
         finally:
-            refresh_mode(core, autonomous, source="scan_after")
+            mode = refresh_mode(core, autonomous, source="scan_after")
+            analysis = result if isinstance(result, dict) else _d(core.state.get("v63_current_analysis"))
+            parallel = _parallel_roster(core, autonomous, analysis)
+            _state(core, mode=mode.get("mode"), latched_current_time=bool(mode.get("latched_current_time")),
+                   parallel_current_time=parallel,
+                   partial_roster_entry_blocked=bool(mode.get("latched_current_time") and not parallel.get("ready_for_new_entry")))
     return scan
+
+
+def _create_wrapper(core: Any, autonomous: Any, base_create: Callable[..., Any]):
+    """No new Current-Time signal is allowed from an incomplete one-strategy subset."""
+    def create(*args: Any, **kwargs: Any) -> Any:
+        analysis = kwargs.get("analysis")
+        if analysis is None and args:
+            analysis = args[0]
+        analysis = _d(analysis)
+        mode = refresh_mode(core, autonomous, source="create_signal")
+        if mode.get("latched_current_time"):
+            parallel = _parallel_roster(core, autonomous, analysis)
+            _state(core, parallel_current_time=parallel,
+                   partial_roster_entry_blocked=not bool(parallel.get("ready_for_new_entry")))
+            if not parallel.get("ready_for_new_entry"):
+                return None
+        return base_create(*args, **kwargs)
+    return create
 
 
 def _learning_wrapper(core: Any, autonomous: Any, base_tick: Callable[..., Any]):
@@ -115,7 +201,6 @@ def _learning_wrapper(core: Any, autonomous: Any, base_tick: Callable[..., Any])
         if mode.get("latched_current_time"):
             strategies = _active_strategies(core, autonomous)
             if not strategies:
-                # Sticky latch: temporary registry absence is NOT permission to restart history.
                 core.state["learning"] = {
                     **_d(core.state.get("learning")),
                     "phase": "CURRENT_TIME_LATCHED_NO_ACTIVE_STRATEGY",
@@ -128,8 +213,6 @@ def _learning_wrapper(core: Any, autonomous: Any, base_tick: Callable[..., Any])
                 _state(core, last_learning_action="SUPPRESS_HISTORICAL_RESTART_NO_ACTIVE_STRATEGY")
                 return None
 
-            # This is the already-installed V56 learning tick. With terminal checkpoint
-            # + strategy it executes CURRENT_PAPER_FORWARD_LEARNING, not historical Stage 6.
             result = await base_tick(*args, **kwargs)
             core.state["learning"] = {
                 **_d(core.state.get("learning")),
@@ -219,7 +302,8 @@ def strategy_explanation(item: dict[str, Any], live: dict[str, Any], v63: Any, v
             f"{len(names)} 個特徵，預測完整 Entry/SL/TP/管理方案的期望 R；不是單一指標觸發。")
     basis = (f"每 {minutes} 分鐘最多評估一次；先過策略狀態 Gate、OOD、Forward quarantine，"
              f"再要求 Pred EV ≥ Required EV 且 V63 當下總分 ≥ {float(v63.LIVE_MIN_SCORE):.1f}/100。"
-             "同時多套合格只取當下分數最高者；已有同方向掛單/持倉不重複進場；"
+             "無持倉時所有完成策略同輪獨立判斷；同時多套合格才取當下分數最高者；"
+             "已有同方向掛單/持倉不重複進場；"
              f"反方向至少需多 {float(v63.REVERSAL_SCORE_MARGIN):.1f} 分才可替換/反轉。")
     data_summary = ("；".join(f"{k}: " + "、".join(v) for k, v in groups.items())
                     if groups else "模型沒有保存 feature_names。")
@@ -266,8 +350,8 @@ def strategy_explanation(item: dict[str, Any], live: dict[str, Any], v63: Any, v
 def _authority(core: Any, autonomous: Any, v63: Any, v64: Any) -> dict[str, Any]:
     mode = refresh_mode(core, autonomous, source="api")
     overview = dict(v64._overview(core, autonomous, v63) or {})
-    diagnostics = {str(x.get("strategy")): x for x in list(
-        _d(core.state.get("v63_current_analysis")).get("strategy_diagnostics") or [])}
+    current_analysis = _d(core.state.get("v63_current_analysis"))
+    diagnostics = {str(x.get("strategy")): x for x in list(current_analysis.get("strategy_diagnostics") or [])}
     registry = _active_strategies(core, autonomous)
     by_id = {str(x.get("strategy_id")): x for x in registry}
     rows = []
@@ -275,10 +359,16 @@ def _authority(core: Any, autonomous: Any, v63: Any, v64: Any) -> dict[str, Any]
         sid = str(base.get("strategy_id") or "")
         item = by_id.get(sid, {"strategy_id": sid, "direction": base.get("direction"), "metrics": {}})
         rows.append({**base, **strategy_explanation(item, _d(diagnostics.get(sid)), v63, v64)})
+
+    parallel = _parallel_roster(core, autonomous, current_analysis)
+    _state(core, parallel_current_time=parallel,
+           partial_roster_entry_blocked=bool(mode.get("latched_current_time") and not parallel.get("ready_for_new_entry")))
+
     overview.update({
         "schema": SCHEMA,
         "runtime": VERSION,
         "runtime_mode": mode,
+        "parallel_current_time": parallel,
         "completed_strategies": rows,
         "strategy_count": len(rows),
         "score_policy": {
@@ -293,13 +383,16 @@ def _authority(core: Any, autonomous: Any, v63: Any, v64: Any) -> dict[str, Any]
         "rules": {
             **_d(overview.get("rules")),
             "forced_current_time_after_terminal_strategy": True,
-            "current_time_latch_is_sticky": True,
             "historical_restart_after_latch": False,
             "current_scan_uses_live_bundle": True,
             "closed_candle_decisions_only": True,
+            "all_completed_strategies_evaluated_same_scan": True,
+            "partial_roster_entry_fail_closed": True,
+            "zero_qualified_means_wait": True,
+            "one_qualified_enters_that_strategy": True,
+            "multiple_qualified_choose_highest_current_score": True,
             "all_strategy_purpose_basis_data_plan_visible": True,
             "all_nonentry_reasons_visible": True,
-            "simultaneous_qualified_choose_highest_current_score": True,
             "one_same_direction_position_until_exit": True,
             "stronger_opposite_may_reverse_with_margin": True,
             "discord_entry_contains_entry_sl_tp": True,
@@ -316,8 +409,9 @@ def _inject(html: str) -> str:
     if "v66-top-authority" in html:
         return html
     card = r"""<section class="card" id="v66-top-authority">
-<h2>🧭 Current-Time 策略權威 / 目前訊號</h2>
+<h2>🧭 Current-Time 全策略權威 / 目前訊號</h2>
 <div id="v66mode" class="notice">讀取模式…</div>
+<div id="v66roster" class="notice" style="margin-top:8px">讀取本輪策略 roster…</div>
 <div id="v66position" class="notice" style="margin-top:8px">讀取目前訊號…</div>
 <div id="v66strategies" style="margin-top:12px"></div>
 <details style="margin-top:10px"><summary>查看固定分數上限 / 仲裁規則</summary><pre id="v66policy">—</pre></details>
@@ -327,15 +421,22 @@ const E=x=>String(x??'—').replace(/[&<>"']/g,s=>({'&':'&amp;','<':'&lt;','>':'
 const N=(x,d=2)=>Number.isFinite(Number(x))?Number(x).toFixed(d):'—';
 const R=x=>Number.isFinite(Number(x))?((Number(x)>=0?'+':'')+Number(x).toFixed(3)+'R'):'—';
 async function V(){
- const m=document.getElementById('v66mode'),p=document.getElementById('v66position'),
-       s=document.getElementById('v66strategies'),q=document.getElementById('v66policy');
- if(!m||!p||!s)return;
+ const m=document.getElementById('v66mode'),rr=document.getElementById('v66roster'),
+       p=document.getElementById('v66position'),s=document.getElementById('v66strategies'),q=document.getElementById('v66policy');
+ if(!m||!rr||!p||!s)return;
  try{
   const r=await fetch('/api/v66/current-authority',{cache:'no-store'}),z=await r.json(),
-        md=z.runtime_mode||{},a=z.current_signal_position||{},arb=z.arbiter||{};
+        md=z.runtime_mode||{},pr=z.parallel_current_time||{},a=z.current_signal_position||{},arb=z.arbiter||{};
   m.className='notice '+(md.latched_current_time?'g':'y');
   m.innerHTML='<b>模式：'+E(md.mode)+'</b>｜Current latch '+(md.latched_current_time?'✅':'⏳')+
    '｜歷史重跑 '+(md.historical_restart_suppressed?'禁止':'尚未鎖定')+'<br>'+E(md.mode_reason_zh||'');
+  rr.className='notice '+(pr.ready_for_new_entry?'g':'r');
+  rr.innerHTML='<b>本輪同時判斷：'+Number(pr.evaluated_strategy_count||0)+' / '+Number(pr.completed_strategy_count||0)+' 套完成策略</b>'+
+   '｜有訊號 '+Number(pr.qualified_count||0)+' 套'+
+   (pr.best_qualified_strategy?'｜目前最佳 '+E(pr.best_qualified_strategy):'')+
+   '<br>'+E(pr.rule_zh||'')+
+   ((pr.missing_from_current_scan||[]).length?'<br><b>⚠️ 尚未進本輪判斷：</b>'+E((pr.missing_from_current_scan||[]).join(', ')):'')+
+   (!pr.v65_roster_authority_ready?'<br><b>⚠️ 完成策略 roster 尚未補齊，新進場已鎖住。</b>':'');
   p.className='notice '+(a.strategy?'g':'y');
   p.innerHTML=a.strategy?'<b>目前 '+E(a.status)+'｜'+E(a.strategy)+'｜'+E(a.direction)+'</b>'+
    '<br>進場 '+E(a.entry)+'｜初始 SL '+E(a.initial_stop)+'｜目前 SL '+E(a.current_stop)+
@@ -344,7 +445,7 @@ async function V(){
    '｜Edge '+R(a.edge_r)+'｜仲裁 '+E(arb.status||'POSITION_LOCK')
    :'<b>目前沒有持倉或掛單</b>｜仲裁 '+E(arb.status||'WAIT');
   const rows=z.completed_strategies||[];
-  s.innerHTML='<h3 style="margin:12px 0 6px">已完成 / 可被 Current-Time 仲裁的策略</h3>'+
+  s.innerHTML='<h3 style="margin:12px 0 6px">全部完成策略（每輪一起判斷，不是輪流選一套）</h3>'+
    (rows.length?rows.map((x,i)=>{
     const data=(x.data_used||[]).map(d=>E(d.label_zh)+' <code>'+E(d.name)+'</code>').join('、')||'—';
     const gates=(x.state_gate_rules_zh||[]).map(E).join('；')||'無額外 Gate';
@@ -362,7 +463,7 @@ async function V(){
      '<br>Pred '+R(x.predicted_ev_r)+'｜Required '+R(x.required_ev_r)+'｜Edge '+R(x.edge_r)+
      '｜OOD '+(Number.isFinite(Number(x.ood_fraction))?(Number(x.ood_fraction)*100).toFixed(1)+'%':'—')+'</div>';
    }).join(''):'尚無已保存策略');
-  if(q)q.textContent=JSON.stringify({score_policy:z.score_policy,rules:z.rules},null,2);
+  if(q)q.textContent=JSON.stringify({parallel_current_time:pr,score_policy:z.score_policy,rules:z.rules},null,2);
  }catch(e){m.className='notice r';m.textContent='V66 讀取失敗：'+String(e)}
 }
 V();setInterval(()=>{if(!document.hidden)V()},3000);
@@ -404,6 +505,7 @@ def install(production: Any, autonomous: Any, v63: Any, v64: Any) -> None:
     core = production.core
 
     core.scan = _scan_wrapper(core, autonomous, core.scan)
+    core.create_signal = _create_wrapper(core, autonomous, core.create_signal)
     core.learning_tick = _learning_wrapper(core, autonomous, core.learning_tick)
 
     core.app.router.routes = [r for r in core.app.router.routes
@@ -415,9 +517,15 @@ def install(production: Any, autonomous: Any, v63: Any, v64: Any) -> None:
     _wrap_html(core, "/dashboard/full")
 
     mode = refresh_mode(core, autonomous, source="install")
+    parallel = _parallel_roster(core, autonomous)
     _state(core, status="READY", mode=mode.get("mode"),
            latched_current_time=bool(mode.get("latched_current_time")),
            historical_restart_suppressed=bool(mode.get("historical_restart_suppressed")),
+           parallel_current_time=parallel,
+           partial_roster_entry_blocked=bool(mode.get("latched_current_time") and not parallel.get("ready_for_new_entry")),
+           every_completed_strategy_same_scan=True,
+           one_qualified_strategy_is_enough_to_enter=True,
+           simultaneous_qualified_only_then_compare_scores=True,
            strategy_explanations_at_top=True, all_strategy_data_visible=True,
            all_strategy_nonentry_reasons_visible=True, current_signal_at_top=True,
            score_caps_changed=False, v56_execution_semantics_changed=False,
@@ -432,6 +540,10 @@ def install(production: Any, autonomous: Any, v63: Any, v64: Any) -> None:
             "forced_current_time_authority": VERSION,
             "current_time_latch_after_terminal_strategy": True,
             "historical_restart_after_current_latch": False,
+            "all_completed_strategies_evaluated_same_scan": True,
+            "partial_roster_can_open_new_signal": False,
+            "one_qualified_strategy_is_sufficient": True,
+            "multiple_qualified_compare_current_score": True,
             "strategy_explainer_at_dashboard_top": True,
             "all_strategy_nonentry_reasons_visible": True,
             "score_caps_changed_by_v66": False,
