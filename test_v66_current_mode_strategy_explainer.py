@@ -33,7 +33,7 @@ class V64:
         return {"rsi": "RSI", "funding": "資金費率"}.get(name, name)
 
 
-def test_current_time_latch_is_sticky():
+def test_current_time_latch_is_sticky_while_checkpoint_remains_terminal():
     core = Core()
     assert v66.refresh_mode(core, Auto, source="test")["mode"] == "HISTORICAL_RESEARCH"
     core.cp = {"status": "COMPLETE"}
@@ -44,6 +44,17 @@ def test_current_time_latch_is_sticky():
     z = v66.refresh_mode(core, Auto, source="test")
     assert z["mode"] == "CURRENT_TIME_PAPER"
     assert z["historical_restart_suppressed"] is True
+
+
+def test_real_semantic_reset_can_return_to_historical_mode():
+    core = Core()
+    core.cp = {"status": "COMPLETE"}
+    core.strategies = [{"strategy_id": "A"}]
+    assert v66.refresh_mode(core, Auto, source="prime")["latched_current_time"] is True
+    core.cp = {"status": "RUNNING"}
+    z = v66.refresh_mode(core, Auto, source="reset")
+    assert z["latched_current_time"] is False
+    assert z["mode"] == "HISTORICAL_RESEARCH"
 
 
 def test_no_strategy_after_latch_never_calls_historical_tick():
@@ -85,3 +96,89 @@ def test_strategy_explanation_has_exact_data_and_execution_plan():
     assert z["execution_plan"]["targets"][1]["rr"] == 2.0
     assert "55.0/100" in z["entry_basis_zh"]
     assert "7.5 分" in z["entry_basis_zh"]
+    assert "所有完成策略同輪獨立判斷" in z["entry_basis_zh"]
+
+
+def _five_strategy_analysis():
+    return {
+        "strategy_diagnostics": [
+            {"strategy": "A", "qualified": False, "v63_live_score": 42.0, "edge_r": -0.1},
+            {"strategy": "B", "qualified": False, "v63_live_score": 48.0, "edge_r": -0.02},
+            {"strategy": "C", "qualified": True, "v63_live_score": 73.0, "edge_r": 0.12},
+            {"strategy": "D", "qualified": False, "v63_live_score": 51.0, "edge_r": 0.01},
+            {"strategy": "E", "qualified": False, "v63_live_score": 39.0, "edge_r": -0.2},
+        ],
+        "selection": {"strategy": "C", "tradeable": True},
+    }
+
+
+def test_five_completed_strategies_are_all_required_in_same_current_scan():
+    core = Core()
+    core.cp = {"status": "COMPLETE"}
+    core.strategies = [{"strategy_id": x} for x in "ABCDE"]
+    core.state[v66.V65_STATE_KEY] = {
+        "current_time_roster_ready": True,
+        "completed_current_time_strategy_count": 5,
+        "missing_current_time_strategy_ids": [],
+    }
+    v66.refresh_mode(core, Auto, source="prime")
+
+    analysis = _five_strategy_analysis()
+    roster = v66._parallel_roster(core, Auto, analysis)
+    assert roster["completed_strategy_count"] == 5
+    assert roster["evaluated_strategy_count"] == 5
+    assert roster["all_completed_evaluated_same_scan"] is True
+    assert roster["qualified_count"] == 1
+    assert roster["best_qualified_strategy"] == "C"
+    assert roster["ready_for_new_entry"] is True
+
+
+def test_one_qualified_of_five_can_enter_after_all_five_were_evaluated():
+    core = Core()
+    core.cp = {"status": "COMPLETE"}
+    core.strategies = [{"strategy_id": x} for x in "ABCDE"]
+    core.state[v66.V65_STATE_KEY] = {
+        "current_time_roster_ready": True,
+        "completed_current_time_strategy_count": 5,
+        "missing_current_time_strategy_ids": [],
+    }
+    v66.refresh_mode(core, Auto, source="prime")
+    calls = {"n": 0}
+
+    def base_create(analysis, m15):
+        calls["n"] += 1
+        return {"strategy": analysis["selection"]["strategy"]}
+
+    wrapped = v66._create_wrapper(core, Auto, base_create)
+    out = wrapped(_five_strategy_analysis(), [])
+    assert out == {"strategy": "C"}
+    assert calls["n"] == 1
+
+
+def test_partial_one_of_five_current_scan_is_fail_closed_and_cannot_open_signal():
+    core = Core()
+    core.cp = {"status": "COMPLETE"}
+    core.strategies = [{"strategy_id": x} for x in "ABCDE"]
+    core.state[v66.V65_STATE_KEY] = {
+        "current_time_roster_ready": True,
+        "completed_current_time_strategy_count": 5,
+        "missing_current_time_strategy_ids": [],
+    }
+    v66.refresh_mode(core, Auto, source="prime")
+    calls = {"n": 0}
+
+    def base_create(analysis, m15):
+        calls["n"] += 1
+        return {"strategy": analysis["selection"]["strategy"]}
+
+    partial = {
+        "strategy_diagnostics": [{"strategy": "C", "qualified": True, "v63_live_score": 73.0, "edge_r": 0.12}],
+        "selection": {"strategy": "C", "tradeable": True},
+    }
+    out = v66._create_wrapper(core, Auto, base_create)(partial, [])
+    assert out is None
+    assert calls["n"] == 0
+    guard = core.state[v66.STATE_KEY]["parallel_current_time"]
+    assert guard["ready_for_new_entry"] is False
+    assert set(guard["missing_from_current_scan"]) == {"A", "B", "D", "E"}
+    assert core.state[v66.STATE_KEY]["partial_roster_entry_blocked"] is True
