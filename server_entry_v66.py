@@ -18,7 +18,9 @@ def _import_production_blocking_v66():
     v63 = importlib.import_module("v63_score_arbiter_notifications")
     v64 = importlib.import_module("v64_current_paper_ux_authority")
     v66 = importlib.import_module("v66_current_mode_strategy_explainer")
+    persistence = importlib.import_module("v66_current_mode_persistence")
     v66.install(production, autonomous, v63, v64)
+    persistence.install(production, autonomous, v66)
 
     role = production.core.state.get("bootstrap_replica_role")
     if isinstance(role, dict):
@@ -29,6 +31,7 @@ def _import_production_blocking_v66():
             "current_paper_ux_authority": "V64_CURRENT_PAPER_CHINESE_UX_LIFECYCLE",
             "multi_strategy_position_authority": "V65_MULTISTRATEGY_POSITION_AUTHORITY",
             "forced_current_time_authority": "V66_FORCED_CURRENT_TIME_STRATEGY_EXPLAINER",
+            "current_time_latch_persistence_authority": "V66_CURRENT_TIME_LATCH_PERSISTENCE",
         })
     return production, app
 
@@ -39,6 +42,6 @@ app = v27.base.app
 if __name__ == "__main__":
     LOG.info("UVICORN_BIND host=0.0.0.0 port=%s mode=AUTONOMOUS_V36 overlay=V54_TERMINAL_RUNTIME", v27.base.PORT)
     LOG.info("UVICORN_BIND host=0.0.0.0 port=%s final_overlay=V66_FORCED_CURRENT_TIME_STRATEGY_EXPLAINER", v27.base.PORT)
-    LOG.info("STACK research=V56 live_hooks=V57 score=V63 ux=V64 position=V65 current_mode=V66")
+    LOG.info("STACK research=V56 live_hooks=V57 score=V63 ux=V64 position=V65 current_mode=V66 persistent_latch=V66")
     v27.base.uvicorn.run(app, host="0.0.0.0", port=v27.base.PORT,
                         access_log=False, log_level="info")
